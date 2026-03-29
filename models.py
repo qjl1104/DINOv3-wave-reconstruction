@@ -163,6 +163,25 @@ class SparseMatchingStereoModel(nn.Module):
         """
         kpl, sl = self.det(lg, mask)
         kpr, sr = self.det(rg, torch.ones_like(rg))
+
+        # --- Sparse Ablation: randomly drop left keypoints ---
+        if self.cfg.KEEP_RATIO < 1.0 and not self.training:
+            B_kp, N_kp, _ = kpl.shape
+            kpl_new = torch.zeros_like(kpl)
+            sl_new = torch.zeros_like(sl)
+            for b in range(B_kp):
+                valid_mask = sl[b] > 0
+                valid_idx = valid_mask.nonzero(as_tuple=True)[0]
+                num_valid = len(valid_idx)
+                if num_valid > 0:
+                    keep_count = max(1, int(num_valid * self.cfg.KEEP_RATIO))
+                    perm = torch.randperm(num_valid, device=kpl.device)[:keep_count]
+                    kept_idx = valid_idx[perm]
+                    kpl_new[b, :keep_count] = kpl[b, kept_idx]
+                    sl_new[b, :keep_count] = sl[b, kept_idx]
+            kpl = kpl_new
+            sl = sl_new
+
         descl = self.ext(lrgb, kpl)
         descr = self.ext(rrgb, kpr)
 
