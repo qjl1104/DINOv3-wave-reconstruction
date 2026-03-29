@@ -1,0 +1,39 @@
+# Model weights
+*.pth
+*.pt
+*.onnx
+*.safetensors
+
+# Training outputs
+training_runs*/
+checkpoints/
+
+# Data & calibration (large binaries)
+data/
+1128/
+*.npz
+*.npy
+*.csv
+
+# Pretrained DINO weights
+dinov3-base-model/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+
+# Gemini
+.gemini/
