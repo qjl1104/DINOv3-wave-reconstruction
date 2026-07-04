@@ -136,12 +136,9 @@ class CorrMatchingStereoModel(nn.Module):
         feat_dim = self.ext.feat_dim
         proj_dim = cfg.CORR_PROJ_DIM
 
-        self.proj_l = nn.Sequential(
-            nn.Conv2d(feat_dim, proj_dim, 1),
-            nn.GELU(),
-            nn.Conv2d(proj_dim, proj_dim, 1),
-        )
-        self.proj_r = nn.Sequential(
+        # 左右图共享投影权重，保证左右描述子在同一特征空间
+        # （独立投影会让 corr = left_desc @ right_row.T 的相似度失去意义）
+        self.proj = nn.Sequential(
             nn.Conv2d(feat_dim, proj_dim, 1),
             nn.GELU(),
             nn.Conv2d(proj_dim, proj_dim, 1),
@@ -259,8 +256,8 @@ class CorrMatchingStereoModel(nn.Module):
             feat_l = self.ext.forward_dense(lrgb)
             feat_r = self.ext.forward_dense(rrgb)
 
-        feat_l_proj = self.proj_l(feat_l)
-        feat_r_proj = self.proj_r(feat_r)
+        feat_l_proj = self.proj(feat_l)
+        feat_r_proj = self.proj(feat_r)
 
         disparity = self.compute_correlation_at_keypoints(
             feat_l_proj, feat_r_proj, kpl
