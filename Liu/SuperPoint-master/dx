@@ -1,0 +1,21 @@
+CUDA_VISIBLE_DEVICES=0 TMPDIR=/tmp/ python export_detections.py configs/magic-point_coco_export.yaml magic-point_synth --pred_only --batch_size=1 --export_name=magic-point_coco-export1
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+for a in /sys/bus/pci/devices/*; do echo 0 | sudo tee -a $a/numa_node; done
+CUDA_VISIBLE_DEVICES=0 TMPDIR=/tmp/ python experiment.py train configs/magic-point_shapes.yaml magic-point_synth
+
+watch -n 1 nvidia-smi
+
+#resize pictures
+find ./ -name '*.png' -exec convert -resize 168x144 {} {} \;
+#nvidia
+watch -n 1 nvidia-smi
+#transform
+find ./ -name "*.bmp" -exec convert {} {}.png \;
+#delete
+sudo find . -name "*.bmp" | sudo xargs rm -rf
+#rename
+i=1; for x in *; do mv $x $i"left".png; let i=i+1; done
+#delete 0 2 4 6 8 
+i=0; sudo find . -name "*$i.png" | sudo xargs rm -rf
+
+CUDA_VISIBLE_DEVICES=0 TMPDIR=/tmp/ python export_detections.py configs/magic-point_coco_export.yaml magic-point_synth --pred_only --batch_size=5 --export_name=magic-point_coco-export1

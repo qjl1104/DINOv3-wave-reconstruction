@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+
+# PyTorch / Model weights
+*.pth
+*.pt
+*.onnx
+*.safetensors
+training_runs*/
+checkpoints/
+
+# Data files (too large for git)
+data/
+*.npz
+*.npy
+
+# DINOv2 pretrained weights
+dinov3-base-model/
+
+# Calibration & training runs
+DINOv3/1128/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Images and outputs
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Gemini/Agent
+.gemini/
+
+# Large data files (exceed GitHub limits)
+*.tar.gz
+*.tar
+camera_calibration/params/*.txt
+Liu/SuperPoint-master/settings/DATA_PATH/
+Liu/SuperPoint-master/pretrained_models/

@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "../../../quantum/hierarqcal-develop"
+		},
+		{
+			"path": "../../../BaiduNetdiskDownload/AE20241118-seed32"
+		},
+		{
+			"path": "E:/AE20241118-seed32_E"
+		},
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"CodeGPT.apiKey": "CodeGPT Plus Beta"
+	}
+}

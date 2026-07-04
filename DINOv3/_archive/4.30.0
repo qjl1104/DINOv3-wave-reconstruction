@@ -1,0 +1,26 @@
+Looking in indexes: https://pypi.tuna.tsinghua.edu.cn/simple/
+Requirement already satisfied: transformers in e:\anaconda\envs\dino\lib\site-packages (4.42.0)
+Requirement already satisfied: filelock in e:\anaconda\envs\dino\lib\site-packages (from transformers) (3.19.1)
+Requirement already satisfied: huggingface-hub<1.0,>=0.23.2 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (0.34.4)
+Collecting numpy<2.0,>=1.17 (from transformers)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/19/77/538f202862b9183f54108557bfda67e17603fc560c384559e769321c9d92/numpy-1.26.4-cp310-cp310-win_amd64.whl (15.8 MB)
+Requirement already satisfied: packaging>=20.0 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (25.0)
+Requirement already satisfied: pyyaml>=5.1 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (6.0.2)
+Requirement already satisfied: regex!=2019.12.17 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (2025.7.34)
+Requirement already satisfied: requests in e:\anaconda\envs\dino\lib\site-packages (from transformers) (2.32.5)
+Requirement already satisfied: tokenizers<0.20,>=0.19 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (0.19.1)
+Requirement already satisfied: safetensors>=0.4.1 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (0.6.2)
+Requirement already satisfied: tqdm>=4.27 in e:\anaconda\envs\dino\lib\site-packages (from transformers) (4.67.1)
+Requirement already satisfied: fsspec>=2023.5.0 in e:\anaconda\envs\dino\lib\site-packages (from huggingface-hub<1.0,>=0.23.2->transformers) (2025.7.0)
+Requirement already satisfied: typing-extensions>=3.7.4.3 in e:\anaconda\envs\dino\lib\site-packages (from huggingface-hub<1.0,>=0.23.2->transformers) (4.14.1)
+Requirement already satisfied: colorama in e:\anaconda\envs\dino\lib\site-packages (from tqdm>=4.27->transformers) (0.4.6)
+Requirement already satisfied: charset_normalizer<4,>=2 in e:\anaconda\envs\dino\lib\site-packages (from requests->transformers) (3.4.3)
+Requirement already satisfied: idna<4,>=2.5 in e:\anaconda\envs\dino\lib\site-packages (from requests->transformers) (3.10)
+Requirement already satisfied: urllib3<3,>=1.21.1 in e:\anaconda\envs\dino\lib\site-packages (from requests->transformers) (2.5.0)
+Requirement already satisfied: certifi>=2017.4.17 in e:\anaconda\envs\dino\lib\site-packages (from requests->transformers) (2025.8.3)
+Installing collected packages: numpy
+  Attempting uninstall: numpy
+    Found existing installation: numpy 2.2.6
+    Uninstalling numpy-2.2.6:
+      Successfully uninstalled numpy-2.2.6
+Successfully installed numpy-1.26.4

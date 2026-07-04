@@ -1,0 +1,341 @@
+扫描时间: 2025-12-17 16:20:44.097463
+正在扫描目录: D:\Research\wave_reconstruction_project\Liu
+
+------------------------------------------------------------
+文件名                                      | 推测类型                 | 匹配度
+------------------------------------------------------------
+fitting\.idea\misc.xml                   | 相机标定                 | ★★★★★
+fitting\.idea\modules.xml                | 相机标定                 | ★★★★★
+fitting\.idea\workspace.xml              | 相机标定                 | ★★★★★
+fitting\.idea\inspectionProfiles\profile | 相机标定                 | ★★★★★
+fitting\.idea\inspectionProfiles\Project | 相机标定                 | ★★★★★
+fitting\model\analysis.py                | 深度学习模型               | ★
+fitting\model\ans_test.png               | 深度学习模型               | ★
+fitting\model\dataset.py                 | 数据处理/主程序             | ★★★
+fitting\model\Discriminator.pth          | 深度学习模型               | ★
+fitting\model\earlystopping.py           | 深度学习模型               | ★
+fitting\model\first.png                  | 深度学习模型               | ★
+fitting\model\fitting3.py                | 深度学习模型               | ★
+fitting\model\fitting7.py                | 深度学习模型               | ★
+fitting\model\Generator.pth              | 深度学习模型               | ★
+fitting\model\loss.py                    | 深度学习模型               | ★★★★★
+fitting\model\main.py                    | 数据处理/主程序             | ★★★
+fitting\model\mis.py                     | 深度学习模型               | ★
+fitting\model\model_pre.py               | 深度学习模型               | ★★★★
+fitting\model\model_train.py             | 深度学习模型               | ★★★★★
+fitting\model\model_train2.py            | 深度学习模型               | ★★★★★
+fitting\model\model_val.py               | 深度学习模型               | ★★★★
+fitting\model\my_model.pth               | 深度学习模型               | ★★★★
+fitting\model\my_model2.pth              | 深度学习模型               | ★★★★
+fitting\model\my_model3.pth              | 深度学习模型               | ★★★★
+fitting\model\Network.py                 | 深度学习模型               | ★★★★★
+fitting\model\only_weights.pth           | 深度学习模型               | ★
+fitting\model\only_weights2.pth          | 深度学习模型               | ★
+fitting\model\only_weights3.pth          | 深度学习模型               | ★
+fitting\model\pretrian.py                | 深度学习模型               | ★
+fitting\model\test.py                    | 深度学习模型               | ★
+fitting\model\x_ini.npy                  | 深度学习模型               | ★
+fitting\model\x_true.npy                 | 深度学习模型               | ★
+fitting\model\y_ini.npy                  | 深度学习模型               | ★
+fitting\model\y_pre.npy                  | 深度学习模型               | ★
+fitting\model\y_pre1.npy                 | 深度学习模型               | ★
+fitting\model\y_pre2.npy                 | 深度学习模型               | ★
+fitting\model\y_tra1.npy                 | 深度学习模型               | ★
+fitting\model\y_tra2.npy                 | 深度学习模型               | ★
+fitting\model\y_tra21.npy                | 深度学习模型               | ★
+fitting\model\y_tra22.npy                | 深度学习模型               | ★
+fitting\model\y_true.npy                 | 深度学习模型               | ★
+fitting\model\y_val1.npy                 | 深度学习模型               | ★
+fitting\model\y_val2.npy                 | 深度学习模型               | ★
+SuperPoint-master\.flake8                | 特征提取与匹配              | ★
+SuperPoint-master\.gitignore             | 特征提取与匹配              | ★
+SuperPoint-master\dx                     | 特征提取与匹配              | ★
+SuperPoint-master\LICENSE.txt            | 特征提取与匹配              | ★
+SuperPoint-master\makefile               | 特征提取与匹配              | ★
+SuperPoint-master\README.md              | 特征提取与匹配              | ★
+SuperPoint-master\requirements.txt       | 特征提取与匹配              | ★
+SuperPoint-master\setup.py               | 特征提取与匹配              | ★
+SuperPoint-master\setup.sh               | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\descriptors_ | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\detector_eva | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\detector_rep | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\detector_rep | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\test_classic | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\test_classic | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\test_homogra | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\utils.py     | 数据处理/主程序             | ★★★
+SuperPoint-master\notebooks\visualize_co | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\visualize_co | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\visualize_co | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\visualize_co | 特征提取与匹配              | ★
+SuperPoint-master\notebooks\visualize_da | 数据处理/主程序             | ★★★
+SuperPoint-master\notebooks\visualize_hp | 特征提取与匹配              | ★
+SuperPoint-master\pretrained_models\sp_v | 深度学习模型               | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★★★★
+SuperPoint-master\settings\DATA_PATH\COC | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\COC | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\COC | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\COC | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\COC | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\COC | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\COC | 相机标定                 | ★★★★★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\DATA_PATH\syn | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ma | 深度学习模型               | ★★★★
+SuperPoint-master\settings\EXPER_PATH\ma | 深度学习模型               | ★★★★
+SuperPoint-master\settings\EXPER_PATH\ou | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ou | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ou | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ou | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ou | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ou | 特征提取与匹配              | ★
+SuperPoint-master\settings\EXPER_PATH\ou | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\experiment. | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\export_desc | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\export_dete | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\export_dete | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\export_mode | 深度学习模型               | ★★★★
+SuperPoint-master\superpoint\generate_co | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\match_featu | 特征提取与匹配              | ★★★★★
+SuperPoint-master\superpoint\settings.py | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\__init__.py | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\configs\cla | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\cla | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\cla | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\coc | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\exa | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\mag | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\mag | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\mag | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\mag | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\sup | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\configs\sup | 相机标定                 | ★★★★★
+SuperPoint-master\superpoint\datasets\ba | 数据处理/主程序             | ★★★
+SuperPoint-master\superpoint\datasets\co | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\datasets\mn | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\datasets\pa | 数据处理/主程序             | ★★★
+SuperPoint-master\superpoint\datasets\sy | 数据处理/主程序             | ★★★
+SuperPoint-master\superpoint\datasets\sy | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\datasets\__ | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\datasets\ut | 数据处理/主程序             | ★★
+SuperPoint-master\superpoint\datasets\ut | 数据处理/主程序             | ★★
+SuperPoint-master\superpoint\datasets\ut | 数据处理/主程序             | ★★
+SuperPoint-master\superpoint\datasets\ut | 数据处理/主程序             | ★★
+SuperPoint-master\superpoint\evaluations | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\evaluations | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\evaluations | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\base | 深度学习模型               | ★★★★
+SuperPoint-master\superpoint\models\clas | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\clas | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\homo | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\magi | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\simp | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\supe | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\util | 数据处理/主程序             | ★★★
+SuperPoint-master\superpoint\models\__in | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\back | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\models\back | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\utils\bitse | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\utils\stdou | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\utils\tools | 特征提取与匹配              | ★
+SuperPoint-master\superpoint\utils\__ini | 特征提取与匹配              | ★
+SuperPoint-master\superpoint.egg-info\de | 特征提取与匹配              | ★
+SuperPoint-master\superpoint.egg-info\PK | 特征提取与匹配              | ★
+SuperPoint-master\superpoint.egg-info\SO | 特征提取与匹配              | ★
+SuperPoint-master\superpoint.egg-info\to | 特征提取与匹配              | ★
+SuperPoint-master\utils\env_cluster.sh   | 特征提取与匹配              | ★
+------------------------------------------------------------
+
+扫描总结 (请将以下内容发给AI):
+
+【1. 相机标定 (最高优先级)】
+  说明: 包含 K_left, K_right, R, T 等矩阵，没有这个没法做三维重建。
+  - fitting\.idea\misc.xml
+  - fitting\.idea\modules.xml
+  - fitting\.idea\workspace.xml
+  - fitting\.idea\inspectionProfiles\profiles_settings.xml
+  - fitting\.idea\inspectionProfiles\Project_Default.xml
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\2022-09-08 .png
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\2022-09-08 13-03-16.png
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\COCO_test2014_000000000016.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\COCO_test2014_000000000027.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\COCO_test2014_000000000057.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\COCO_test2014_000000000063.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\LEFT1\left.png
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\left.png
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\left.npz
+  - SuperPoint-master\superpoint\configs\classical-descriptors.yaml
+  - SuperPoint-master\superpoint\configs\classical-detectors_repeatability.yaml
+  - SuperPoint-master\superpoint\configs\classical-detectors_shapes.yaml
+  - SuperPoint-master\superpoint\configs\coco_patches_generation.yaml
+  - SuperPoint-master\superpoint\configs\example.yaml
+  - SuperPoint-master\superpoint\configs\magic-point_coco_export.yaml
+  - SuperPoint-master\superpoint\configs\magic-point_coco_train.yaml
+  - SuperPoint-master\superpoint\configs\magic-point_repeatability.yaml
+  - SuperPoint-master\superpoint\configs\magic-point_shapes.yaml
+  - SuperPoint-master\superpoint\configs\superpoint_coco.yaml
+  - SuperPoint-master\superpoint\configs\superpoint_hpatches.yaml
+
+【2. 特征提取与匹配 (核心算法)】
+  说明: 论文2.2.4节的自编算子和SuperPoint/SuperGlue实现。
+  - SuperPoint-master\.flake8
+  - SuperPoint-master\.gitignore
+  - SuperPoint-master\dx
+  - SuperPoint-master\LICENSE.txt
+  - SuperPoint-master\makefile
+  - SuperPoint-master\README.md
+  - SuperPoint-master\requirements.txt
+  - SuperPoint-master\setup.py
+  - SuperPoint-master\setup.sh
+  - SuperPoint-master\notebooks\descriptors_evaluation_on_hpatches.ipynb
+  - SuperPoint-master\notebooks\detector_evaluation_magic_point.ipynb
+  - SuperPoint-master\notebooks\detector_repeatability_coco.ipynb
+  - SuperPoint-master\notebooks\detector_repeatability_hpatches.ipynb
+  - SuperPoint-master\notebooks\test_classical_descriptors.ipynb
+  - SuperPoint-master\notebooks\test_classical_detectors.ipynb
+  - SuperPoint-master\notebooks\test_homography_adaptation.ipynb
+  - SuperPoint-master\notebooks\visualize_coco_adaptation-iterations.ipynb
+  - SuperPoint-master\notebooks\visualize_coco_augmentation.ipynb
+  - SuperPoint-master\notebooks\visualize_coco_pairs.ipynb
+  - SuperPoint-master\notebooks\visualize_coco_patches.ipynb
+  - SuperPoint-master\notebooks\visualize_hpatches.tmp
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\2022-09-08 .png
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\2022-09-08 13-03-16.png
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\COCO_test2014_000000000016.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\COCO_test2014_000000000027.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\COCO_test2014_000000000057.jpg
+  - SuperPoint-master\settings\DATA_PATH\COCO\train2014\COCO_test2014_000000000063.jpg
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_checkerboard.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_cube.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_ellipses.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_lines.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_multiple_polygons.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_polygon.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_star.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\draw_stripes.tar.gz
+  - SuperPoint-master\settings\DATA_PATH\synthetic_shapes_v6\gaussian_noise.tar.gz
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\checkpoint
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\config.yml
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\events.out.tfevents.1662694402.liu-Dell-G15-5511
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\events.out.tfevents.1663245593.liu-Dell-G15-5511
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\events.out.tfevents.1663255500.liu-Dell-G15-5511
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\events.out.tfevents.1666885002.liu-Dell-G15-5511
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\log
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\2022-09-08 .npz
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\2022-09-08 13-03-16.npz
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\COCO_test2014_000000000016.npz
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\COCO_test2014_000000000027.npz
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\COCO_test2014_000000000057.npz
+  - SuperPoint-master\settings\EXPER_PATH\outputs\magic-point_coco-export1\COCO_test2014_000000000063.npz
+  - SuperPoint-master\superpoint\experiment.py
+  - SuperPoint-master\superpoint\export_descriptors.py
+  - SuperPoint-master\superpoint\export_detections.py
+  - SuperPoint-master\superpoint\export_detections_repeatability.py
+  - SuperPoint-master\superpoint\generate_coco_patches.py
+  - SuperPoint-master\superpoint\match_features_demo.py
+  - SuperPoint-master\superpoint\settings.py
+  - SuperPoint-master\superpoint\__init__.py
+  - SuperPoint-master\superpoint\datasets\coco.py
+  - SuperPoint-master\superpoint\datasets\mnist.py
+  - SuperPoint-master\superpoint\datasets\synthetic_shapes.py
+  - SuperPoint-master\superpoint\datasets\__init__.py
+  - SuperPoint-master\superpoint\evaluations\descriptor_evaluation.py
+  - SuperPoint-master\superpoint\evaluations\detector_evaluation.py
+  - SuperPoint-master\superpoint\evaluations\__init__.py
+  - SuperPoint-master\superpoint\models\classical_detectors.py
+  - SuperPoint-master\superpoint\models\classical_detectors_descriptors.py
+  - SuperPoint-master\superpoint\models\homographies.py
+  - SuperPoint-master\superpoint\models\magic_point.py
+  - SuperPoint-master\superpoint\models\simple_classifier.py
+  - SuperPoint-master\superpoint\models\super_point.py
+  - SuperPoint-master\superpoint\models\__init__.py
+  - SuperPoint-master\superpoint\models\backbones\vgg.py
+  - SuperPoint-master\superpoint\models\backbones\__init__.py
+  - SuperPoint-master\superpoint\utils\bitset.py
+  - SuperPoint-master\superpoint\utils\stdout_capturing.py
+  - SuperPoint-master\superpoint\utils\tools.py
+  - SuperPoint-master\superpoint\utils\__init__.py
+  - SuperPoint-master\superpoint.egg-info\dependency_links.txt
+  - SuperPoint-master\superpoint.egg-info\PKG-INFO
+  - SuperPoint-master\superpoint.egg-info\SOURCES.txt
+  - SuperPoint-master\superpoint.egg-info\top_level.txt
+  - SuperPoint-master\utils\env_cluster.sh
+
+【3. 深度学习模型 (波面预测)】
+  说明: 论文第四章的ConvLSTM网络结构和训练代码。
+  - fitting\model\analysis.py
+  - fitting\model\ans_test.png
+  - fitting\model\Discriminator.pth
+  - fitting\model\earlystopping.py
+  - fitting\model\first.png
+  - fitting\model\fitting3.py
+  - fitting\model\fitting7.py
+  - fitting\model\Generator.pth
+  - fitting\model\loss.py
+  - fitting\model\mis.py
+  - fitting\model\model_pre.py
+  - fitting\model\model_train.py
+  - fitting\model\model_train2.py
+  - fitting\model\model_val.py
+  - fitting\model\my_model.pth
+  - fitting\model\my_model2.pth
+  - fitting\model\my_model3.pth
+  - fitting\model\Network.py
+  - fitting\model\only_weights.pth
+  - fitting\model\only_weights2.pth
+  - fitting\model\only_weights3.pth
+  - fitting\model\pretrian.py
+  - fitting\model\test.py
+  - fitting\model\x_ini.npy
+  - fitting\model\x_true.npy
+  - fitting\model\y_ini.npy
+  - fitting\model\y_pre.npy
+  - fitting\model\y_pre1.npy
+  - fitting\model\y_pre2.npy
+  - fitting\model\y_tra1.npy
+  - fitting\model\y_tra2.npy
+  - fitting\model\y_tra21.npy
+  - fitting\model\y_tra22.npy
+  - fitting\model\y_true.npy
+  - fitting\model\y_val1.npy
+  - fitting\model\y_val2.npy
+  - SuperPoint-master\pretrained_models\sp_v6.tgz
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\model.ckpt-50000.data-00000-of-00001
+  - SuperPoint-master\settings\EXPER_PATH\magic-point_synth\model.ckpt-50000.index
+  - SuperPoint-master\superpoint\export_model.py
+  - SuperPoint-master\superpoint\models\base_model.py
+
+【4. 数据处理/主程序】
+  说明: 整个流程的入口或数据预处理脚本。
+  - fitting\model\dataset.py
+  - fitting\model\main.py
+  - SuperPoint-master\notebooks\utils.py
+  - SuperPoint-master\notebooks\visualize_data_augmentation.ipynb
+  - SuperPoint-master\superpoint\datasets\base_dataset.py
+  - SuperPoint-master\superpoint\datasets\patches_dataset.py
+  - SuperPoint-master\superpoint\datasets\synthetic_dataset.py
+  - SuperPoint-master\superpoint\datasets\utils\augmentation_legacy.py
+  - SuperPoint-master\superpoint\datasets\utils\photometric_augmentation.py
+  - SuperPoint-master\superpoint\datasets\utils\pipeline.py
+  - SuperPoint-master\superpoint\datasets\utils\__init__.py
+  - SuperPoint-master\superpoint\models\utils.py
