@@ -153,10 +153,21 @@ class PINNPhysicsLoss(nn.Module):
         loss = (F.smooth_l1_loss(val_l, val_r, reduction='none') * weights).sum() / weight_sum
         return loss
 
-    def forward(self, lg, rg, kpl, kpr, scores, Q):
-        l_photo, l_disp = self.compute_photometric(lg, rg, kpl, kpr, scores)
+    def forward(self, lg, rg, kpl, kpr, scores, Q, correlation_probs=None):
+        """计算所有损失。
+
+        Args:
+            correlation_probs: Sinkhorn 软分配矩阵列表，每个元素 [n_kp, Wf]。
+                              为 None 时跳过相关体损失（兼容旧调用）。
+        """
+        l_disp = self.compute_disp_loss(kpl, kpr, scores)
         l_smooth, l_slope, l_zeromean = self.compute_pinn(kpl, kpr, scores, Q)
-        return l_photo, l_disp, l_smooth, l_slope, l_zeromean
+
+        l_corr = torch.tensor(0.0, device=kpl.device)
+        if correlation_probs is not None and len(correlation_probs) > 0:
+            l_corr = self.compute_correlation_loss(correlation_probs)
+
+        return l_disp, l_smooth, l_slope, l_zeromean, l_corr
 
     def compute_photometric(self, lg, rg, kpl, kpr, scores):
         disp = kpl[..., 0] - kpr[..., 0]
@@ -173,6 +184,58 @@ class PINNPhysicsLoss(nn.Module):
         l_intensity = self.intensity_penalty(patches_l, patches_r, scores)
         l_photo = l_masked + l_intensity
         return l_photo, l_disp
+
+    def compute_disp_loss(self, kpl, kpr, scores):
+        """视差正则化损失：惩罚负视差（交叉匹配）。"""
+        disp = kpl[..., 0] - kpr[..., 0]
+        weight_sum = scores.sum()
+        neg_disp_penalty = F.relu(-disp) * 0.1
+        if weight_sum > 1e-4:
+            l_disp = (neg_disp_penalty * scores).sum() / weight_sum
+        else:
+            l_disp = neg_disp_penalty.mean()
+        return l_disp
+
+    def compute_correlation_loss(self, prob_list):
+        """相关体损失：熵 + 峰度，鼓励 Sinkhorn 软分配具有清晰峰值。
+
+        Args:
+            prob_list: 软分配矩阵列表，每个元素 [n_kp, Wf]，行归一化（每行和为1）。
+
+        Returns:
+            平均损失（熵 + 0.5 * 峰度）。
+        """
+        if len(prob_list) == 0:
+            device = prob_list[0].device if prob_list else torch.device('cpu')
+            return torch.tensor(0.0, device=device)
+
+        l_entropy = 0.0
+        l_peakiness = 0.0
+        n = 0
+
+        for prob in prob_list:
+            prob_f = prob.float()
+            n_kp = prob_f.shape[0]
+            if n_kp == 0:
+                continue
+
+            # 熵损失：低熵 → 尖锐峰值，避免均匀分布
+            log_prob = torch.log(prob_f + 1e-8)
+            entropy = -(prob_f * log_prob).sum(dim=-1).mean()
+            l_entropy += entropy
+
+            # 峰度损失：第二高峰 / 第一高峰，越小越尖锐
+            if prob_f.shape[1] >= 2:
+                top2 = torch.topk(prob_f, k=2, dim=-1).values
+                peakiness = (top2[:, 1] / (top2[:, 0] + 1e-8)).mean()
+                l_peakiness += peakiness
+
+            n += 1
+
+        if n == 0:
+            return torch.tensor(0.0, device=prob_list[0].device)
+
+        return (l_entropy + 0.5 * l_peakiness) / n
 
     def compute_pinn(self, kpl, kpr, scores, Q):
         mask_final = (scores > 0.1)

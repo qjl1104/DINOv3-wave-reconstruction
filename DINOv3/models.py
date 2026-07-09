@@ -110,21 +110,20 @@ class CorrRefinementNet(nn.Module):
 
 class CorrMatchingStereoModel(nn.Module):
     """
-    DINOv3-based stereo matching via 1D Correlation Volume + Sinkhorn 匹配。
+    DINOv3 + 几何指纹融合的立体匹配模型。
+
+    核心思路：
+      DINOv3 特征提供了全局上下文（但小圆片间区分度不足），
+      几何指纹（KNN 相对位置）提供了小圆片"星座"的唯一性标识。
+      两者拼接后通过 geo_fusion 层融合，让网络学习最优组合。
 
     Architecture:
-      1. DINOv3 backbone extracts dense feature maps [B, C, Hf, Wf]
-      2. Feature projection: C -> D (learnable, reduces correlation cost)
-      3. For each epipolar row, compute 1D correlation between ALL left keypoints
-         and the dense right feature row simultaneously
-      4. Sinkhorn optimal transport enforces global consistency:
-         - 同一行的关键点不会全部匹配到同一个右图位置
-         - 产生近似一对一的行级软分配
-      5. Soft-argmax extracts sub-pixel disparity from Sinkhorn assignment
-
-    相比逐点独立 soft-argmax，Sinkhorn 的核心优势：
-      - 打破退化：多个相同关键点不能同时匹配到同一位置
-      - 全局一致性：利用关键点间的相对位置约束
+      1. DINOv3 backbone → dense feature maps [B, C, Hf, Wf]
+      2. Feature projection: C → D (learnable, shared)
+      3. 几何指纹：对每个关键点计算其 K 近邻的相对位置 → [2K]
+      4. 融合：Linear(D + 2K, D) → 融合特征
+      5. 1D 相关体 + Sinkhorn 全局匹配
+      6. Soft-argmax → 亚像素视差
     """
 
     def __init__(self, cfg):
@@ -135,13 +134,20 @@ class CorrMatchingStereoModel(nn.Module):
 
         feat_dim = self.ext.feat_dim
         proj_dim = cfg.CORR_PROJ_DIM
+        geo_dim = cfg.GEO_KNN_K * 2  # 几何指纹维度 = K * 2 (x, y)
 
         # 左右图共享投影权重，保证左右描述子在同一特征空间
-        # （独立投影会让 corr = left_desc @ right_row.T 的相似度失去意义）
         self.proj = nn.Sequential(
             nn.Conv2d(feat_dim, proj_dim, 1),
             nn.GELU(),
             nn.Conv2d(proj_dim, proj_dim, 1),
+        )
+
+        # DINO + 几何指纹融合层（可学习，左右图共享）
+        self.geo_fusion = nn.Sequential(
+            nn.Linear(proj_dim + geo_dim, cfg.GEO_FUSION_DIM),
+            nn.GELU(),
+            nn.Linear(cfg.GEO_FUSION_DIM, cfg.GEO_FUSION_DIM),
         )
 
         self.corr_refine = CorrRefinementNet()
@@ -185,23 +191,104 @@ class CorrMatchingStereoModel(nn.Module):
             P = F.softmax(log_P, dim=1)
         return P
 
-    def compute_correlation_at_keypoints(self, feat_l, feat_r, keypoints):
+    def compute_geo_fingerprint_at_positions(self, query_positions, all_keypoints, K):
+        """
+        为一组查询位置计算几何指纹（K 近邻的相对位置向量，按角度排序）。
+
+        几何指纹天然区分不同位置的小圆片：
+          - 不同位置的"星座"不同 → 指纹不同
+          - 近邻位置 → 指纹相似（连续变化）
+          - 远距离位置 → 指纹不同
+
+        Args:
+            query_positions: [Q, 2] 查询点的像素坐标
+            all_keypoints:   [N, 2] 所有关键点（用于找邻居）
+            K:               近邻数量
+
+        Returns:
+            fingerprints: [Q, 2*K] 每个查询点的几何指纹
+        """
+        Q = query_positions.shape[0]
+        N = all_keypoints.shape[0]
+        if N < K + 1 or Q == 0:
+            return torch.zeros(Q, 2 * K, device=query_positions.device)
+
+        # 计算所有查询点到所有关键点的距离 [Q, N]
+        # 只用同一行做向量化：dist_{q,n} = sqrt((x_q - x_n)² + (y_q - y_n)²)
+        diff = query_positions.unsqueeze(1) - all_keypoints.unsqueeze(0)  # [Q, N, 2]
+        dists = (diff[:, :, 0] ** 2 + diff[:, :, 1] ** 2).sqrt()  # [Q, N]
+
+        # 取 K 近邻
+        _, knn_idx = dists.topk(K, dim=-1, largest=False)  # [Q, K]
+
+        # 提取相对位置向量
+        neighbors = diff[torch.arange(Q).unsqueeze(1), knn_idx]  # [Q, K, 2]
+
+        # 按角度排序（保证旋转不变性——旋转后所有邻居一起转，排序后指纹不变）
+        angles = torch.atan2(neighbors[:, :, 1], neighbors[:, :, 0])  # [Q, K]
+        sorted_idx = torch.argsort(angles, dim=-1)  # [Q, K]
+        neighbors_sorted = neighbors[torch.arange(Q).unsqueeze(1), sorted_idx]  # [Q, K, 2]
+
+        return neighbors_sorted.reshape(Q, -1)  # [Q, 2*K]
+
+    def compute_geo_fingerprint_row(self, all_keypoints, row_idx, Wf, patch_size, K):
+        """
+        为右图某一行所有列位置计算几何指纹。
+
+        左图用关键点位置（稀疏），右图需要对整行所有列位置（密集）都计算，
+        因为相关体是 [n_kp, Wf] 的密集矩阵。
+
+        Args:
+            all_keypoints: [N, 2] 右图所有关键点
+            row_idx:       特征图行索引
+            Wf:            特征图宽度
+            patch_size:    DINO patch 大小
+            K:             近邻数量
+
+        Returns:
+            fingerprints: [Wf, 2*K] 该行所有列位置的几何指纹
+        """
+        # 该行所有列位置对应的像素坐标
+        cols = torch.arange(Wf, device=all_keypoints.device).float() * patch_size + patch_size / 2
+        row_y = torch.full((Wf,), row_idx * patch_size + patch_size / 2, device=all_keypoints.device)
+        query_positions = torch.stack([cols, row_y], dim=-1)  # [Wf, 2]
+
+        return self.compute_geo_fingerprint_at_positions(query_positions, all_keypoints, K)
+
+    def compute_correlation_at_keypoints(self, feat_l, feat_r, keypoints_l, keypoints_r):
+        """
+        计算相关体：DINO 特征 + 几何指纹融合后做内积。
+
+        相比纯 DINO 版本，这里：
+          1. 对左图关键点计算几何指纹 [n_kp, 2K]
+          2. 对右图该行所有列计算几何指纹 [Wf, 2K]  
+          3. 与 DINO 特征拼接后通过 geo_fusion 融合
+          4. 在融合特征空间计算相关体
+        """
         B, C, Hf, Wf = feat_l.shape
         patch_size = self.ext.patch
-        N = keypoints.shape[1]
+        N = keypoints_l.shape[1]
+        K = self.cfg.GEO_KNN_K
 
         disp_map = torch.zeros(B, N, device=feat_l.device)
+        prob_list = []
 
         for b in range(B):
-            kps = keypoints[b]
-            raw_row = torch.round(kps[:, 1] / patch_size).long().clamp(0, Hf - 1)
-            raw_col = torch.round(kps[:, 0] / patch_size).long().clamp(0, Wf - 1)
+            kps_l = keypoints_l[b]
+            kps_r = keypoints_r[b]
 
-            valid_kp = (kps[:, 0] > 0) | (kps[:, 1] > 0)
+            raw_row = torch.round(kps_l[:, 1] / patch_size).long().clamp(0, Hf - 1)
+            raw_col = torch.round(kps_l[:, 0] / patch_size).long().clamp(0, Wf - 1)
+
+            valid_kp = (kps_l[:, 0] > 0) | (kps_l[:, 1] > 0)
             row_feat = raw_row[valid_kp]
             col_feat = raw_col[valid_kp]
             if len(row_feat) == 0:
                 continue
+
+            # 右图有效关键点（用于几何指纹计算）
+            valid_kp_r = (kps_r[:, 0] > 0) | (kps_r[:, 1] > 0)
+            kps_r_valid = kps_r[valid_kp_r]
 
             unique_rows = row_feat.unique()
 
@@ -212,13 +299,37 @@ class CorrMatchingStereoModel(nn.Module):
                 if n_kp == 0:
                     continue
 
-                left_row = feat_l[b, :, row_idx, :]
-                right_row = feat_r[b, :, row_idx, :]
+                # --- DINO 特征 ---
+                left_row = feat_l[b, :, row_idx, :]    # [C, Wf]
+                right_row = feat_r[b, :, row_idx, :]   # [C, Wf]
 
                 cols = col_feat[kp_indices_in_valid]
-                left_desc = left_row[:, cols].T
-                left_desc = F.normalize(left_desc, dim=-1)
-                right_row_norm = F.normalize(right_row.T, dim=-1)
+                left_desc_dino = left_row[:, cols].T   # [n_kp, D]
+
+                # --- 几何指纹 ---
+                # 左图：该行关键点位置的几何指纹
+                query_positions_l = kps_l[valid_kp][kp_indices_in_valid]  # [n_kp, 2]
+                geo_fp_l = self.compute_geo_fingerprint_at_positions(
+                    query_positions_l, kps_l[valid_kp], K
+                )  # [n_kp, 2K]
+
+                # 右图：该行所有列位置的几何指纹
+                geo_fp_r = self.compute_geo_fingerprint_row(
+                    kps_r_valid, row_idx, Wf, patch_size, K
+                )  # [Wf, 2K]
+
+                # --- DINO + 几何融合 ---
+                left_desc_fused = self.geo_fusion(
+                    torch.cat([left_desc_dino, geo_fp_l], dim=-1)
+                )  # [n_kp, D_fusion]
+
+                right_desc_fused = self.geo_fusion(
+                    torch.cat([right_row.T, geo_fp_r], dim=-1)
+                )  # [Wf, D_fusion]
+
+                # --- 相关体 ---
+                left_desc = F.normalize(left_desc_fused, dim=-1)
+                right_row_norm = F.normalize(right_desc_fused, dim=-1)
 
                 corr = torch.mm(left_desc, right_row_norm.T)
                 corr = corr * self.temperature.abs().clamp(min=0.1)
@@ -231,6 +342,8 @@ class CorrMatchingStereoModel(nn.Module):
                     cost = -corr_refined
                     prob = self.sinkhorn(cost, self.sinkhorn_eps)
 
+                prob_list.append(prob)
+
                 col_range = torch.arange(Wf, device=feat_l.device).float()
                 expected_col = (prob * col_range.unsqueeze(0)).sum(dim=-1)
 
@@ -240,7 +353,7 @@ class CorrMatchingStereoModel(nn.Module):
                 kp_indices_original = valid_kp.nonzero(as_tuple=True)[0][kp_indices_in_valid]
                 disp_map[b, kp_indices_original] = disp_pixel
 
-        return disp_map
+        return disp_map, prob_list
 
     def forward(self, lg, rg, lrgb, rrgb, mask, cached_data=None):
         if cached_data is not None:
@@ -259,8 +372,8 @@ class CorrMatchingStereoModel(nn.Module):
         feat_l_proj = self.proj(feat_l)
         feat_r_proj = self.proj(feat_r)
 
-        disparity = self.compute_correlation_at_keypoints(
-            feat_l_proj, feat_r_proj, kpl
+        disparity, prob_list = self.compute_correlation_at_keypoints(
+            feat_l_proj, feat_r_proj, kpl, kpr
         )
 
         kp_right_x = kpl[:, :, 0] - disparity
@@ -274,4 +387,5 @@ class CorrMatchingStereoModel(nn.Module):
             'keypoints_right_pred': kp_right_pred,
             'disparity': disparity,
             'match_scores': sl.unsqueeze(-1),
+            'correlation_probs': prob_list,  # Sinkhorn 软分配矩阵列表
         }

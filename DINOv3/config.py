@@ -54,6 +54,10 @@ class Config:
     MATCHING_TEMPERATURE: float = 15.0
     EPIPOLAR_THRESHOLD: float = 3.0
 
+    # ===== 几何指纹参数（DINO + 几何融合） =====
+    GEO_KNN_K: int = 8          # 几何指纹的近邻数量
+    GEO_FUSION_DIM: int = 128   # 融合后的特征维度（与 CORR_PROJ_DIM 一致）
+
     # ===== 训练参数 =====
     BATCH_SIZE: int = 4
     ACCUMULATION_STEPS: int = 1
@@ -62,11 +66,12 @@ class Config:
     SEED: int = 42
 
     # ===== 损失权重 =====
-    PHOTOMETRIC_WEIGHT: float = 1.0
-    DISPARITY_WEIGHT: float = 2.0
-    PHY_SMOOTH_WEIGHT: float = 2.0
-    PHY_SLOPE_WEIGHT: float = 0.5
-    PHY_ZEROMEAN_WEIGHT: float = 0.1
+    CORRELATION_WEIGHT: float = 2.0   # 相关体损失（熵 + 峰度），替代光度损失
+    PHOTOMETRIC_WEIGHT: float = 0.0   # 光度损失已废弃（水面不满足亮度恒定假设）
+    DISPARITY_WEIGHT: float = 1.0
+    PHY_SMOOTH_WEIGHT: float = 1.0
+    PHY_SLOPE_WEIGHT: float = 0.3
+    PHY_ZEROMEAN_WEIGHT: float = 0.05
     PATCH_SIZE_PHOTOMETRIC: int = 11
 
     # ===== PINN 物理约束参数 =====

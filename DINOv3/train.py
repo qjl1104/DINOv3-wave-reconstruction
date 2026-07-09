@@ -92,7 +92,7 @@ class Trainer:
 
         # --- Tracking ---
         self.history = {
-            'total_loss': [], 'photo_loss': [], 'disp_loss': [],
+            'total_loss': [], 'corr_loss': [], 'disp_loss': [],
             'smooth_loss': [], 'slope_loss': [], 'mean_loss': [],
             'val_loss': [], 'lr': [],
         }
@@ -197,22 +197,23 @@ class Trainer:
             kpl = out['keypoints_left']
             kpr_pred = out['keypoints_right_pred']
             scores = out['scores_left']
+            corr_probs = out['correlation_probs']
 
-            l_photo, l_disp = self.loss_fn.compute_photometric(lg, rg, kpl, kpr_pred, scores)
+        l_disp, l_smooth, l_slope, l_zeromean, l_corr = self.loss_fn(
+            lg, rg, kpl, kpr_pred, scores, Q, corr_probs
+        )
 
-        l_smooth, l_slope, l_zeromean = self.loss_fn.compute_pinn(kpl, kpr_pred, scores, Q)
-
-        w_photo = self.cfg.PHOTOMETRIC_WEIGHT * l_photo
+        w_corr = self.cfg.CORRELATION_WEIGHT * l_corr
         w_disp = self.cfg.DISPARITY_WEIGHT * l_disp
         w_smooth = self.cfg.PHY_SMOOTH_WEIGHT * l_smooth
         w_slope = self.cfg.PHY_SLOPE_WEIGHT * l_slope
         w_zero = self.cfg.PHY_ZEROMEAN_WEIGHT * l_zeromean
 
-        total = w_photo + w_disp + w_smooth + w_slope + w_zero
+        total = w_corr + w_disp + w_smooth + w_slope + w_zero
 
         loss_dict = {
             'total': total.item(),
-            'photo': l_photo.item(),
+            'corr': l_corr.item(),
             'disp': l_disp.item(),
             'smooth': l_smooth.item(),
             'slope': l_slope.item(),
@@ -234,7 +235,7 @@ class Trainer:
                 total, loss_dict = self._compute_loss(batch)
 
             print(f"[Self-Check] Initial Loss: {total.item():.4f}")
-            print(f"    - Photo: {loss_dict['photo']:.4f}")
+            print(f"    - Corr:  {loss_dict['corr']:.4f}")
             print(f"    - Disp:  {loss_dict['disp']:.4f}")
             print(f"    - Phy:   {loss_dict['smooth']:.4f} + {loss_dict['slope']:.4f} + {loss_dict['mean']:.4f}")
 
@@ -250,7 +251,7 @@ class Trainer:
     def _train_one_epoch(self, epoch):
         """Run one training epoch. Returns average loss dict."""
         self.model.train()
-        ep_stats = {k: 0.0 for k in ['total', 'photo', 'disp', 'smooth', 'slope', 'mean']}
+        ep_stats = {k: 0.0 for k in ['total', 'corr', 'disp', 'smooth', 'slope', 'mean']}
         count = 0
         self.optimizer.zero_grad()
 
@@ -278,7 +279,7 @@ class Trainer:
                 count += 1
                 pbar.set_postfix({
                     'Loss': f"{loss_dict['total']:.1f}",
-                    'Photo': f"{loss_dict['photo']:.3f}",
+                    'Corr': f"{loss_dict['corr']:.3f}",
                     'Sm': f"{loss_dict['smooth']:.2f}",
                     'LR': f"{self.optimizer.param_groups[0]['lr']:.2e}",
                 })
@@ -320,7 +321,7 @@ class Trainer:
             loss, loss_dict = self._compute_loss(batch)
             total_loss += loss.item()
             count += 1
-            pbar.set_postfix({'Loss': f"{loss.item():.1f}", 'Photo': f"{loss_dict['photo']:.3f}"})
+            pbar.set_postfix({'Loss': f"{loss.item():.1f}", 'Corr': f"{loss_dict['corr']:.3f}"})
 
         avg_loss = total_loss / count if count > 0 else float('inf')
         print(f"[Val] Epoch {epoch + 1}: Val Loss = {avg_loss:.4f}")
@@ -368,7 +369,7 @@ class Trainer:
 
         # Geometric
         plt.subplot(1, 4, 2)
-        plt.plot(epochs, self.history['photo_loss'], label='Photo', color='blue')
+        plt.plot(epochs, self.history['corr_loss'], label='Corr', color='blue')
         plt.plot(epochs, self.history['disp_loss'], label='Disparity', color='purple')
         plt.title('Geometric')
         plt.legend()
@@ -412,7 +413,7 @@ class Trainer:
                 avg_losses = self._train_one_epoch(epoch)
 
                 self.history['total_loss'].append(avg_losses['total'])
-                self.history['photo_loss'].append(avg_losses['photo'])
+                self.history['corr_loss'].append(avg_losses['corr'])
                 self.history['disp_loss'].append(avg_losses['disp'])
                 self.history['smooth_loss'].append(avg_losses['smooth'])
                 self.history['slope_loss'].append(avg_losses['slope'])
