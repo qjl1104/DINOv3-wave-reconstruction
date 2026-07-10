@@ -229,6 +229,11 @@ class CorrMatchingStereoModel(nn.Module):
         sorted_idx = torch.argsort(angles, dim=-1)  # [Q, K]
         neighbors_sorted = neighbors[torch.arange(Q).unsqueeze(1), sorted_idx]  # [Q, K, 2]
 
+        # 归一化到 [-1, 1]：除以图像对角线长度，与 DINO 特征处于同一量级
+        # 避免梯度爆炸（原始像素坐标可达数百，远超 DINO 特征的 ~[-0.5, 0.5]）
+        diag = (self.cfg.IMAGE_WIDTH ** 2 + self.cfg.IMAGE_HEIGHT ** 2) ** 0.5
+        neighbors_sorted = neighbors_sorted / diag
+
         return neighbors_sorted.reshape(Q, -1)  # [Q, 2*K]
 
     def compute_geo_fingerprint_row(self, all_keypoints, row_idx, Wf, patch_size, K):
