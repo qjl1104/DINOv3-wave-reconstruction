@@ -263,6 +263,14 @@ class Trainer:
 
             try:
                 total_loss, loss_dict = self._compute_loss(batch)
+
+                # NaN/Inf 检测：跳过垃圾批次，防止单个坏 batch 污染模型权重
+                if not torch.isfinite(total_loss):
+                    skip_count += 1
+                    self.optimizer.zero_grad()
+                    pbar.set_postfix({'Warning': f'NaN/Inf skipped ({skip_count})'})
+                    continue
+
                 scaled_loss = total_loss / self.cfg.ACCUMULATION_STEPS
 
                 self.scaler.scale(scaled_loss).backward()

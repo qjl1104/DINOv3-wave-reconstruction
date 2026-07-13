@@ -354,6 +354,8 @@ class CorrMatchingStereoModel(nn.Module):
 
                 disp_feat = cols.float() - expected_col
                 disp_pixel = disp_feat * patch_size
+                # 钳制视差范围，防止极端值导致 3D 重建坐标爆炸 → cdist 显存飙升
+                disp_pixel = disp_pixel.clamp(-512, 512)
 
                 kp_indices_original = valid_kp.nonzero(as_tuple=True)[0][kp_indices_in_valid]
                 disp_map[b, kp_indices_original] = disp_pixel

@@ -61,7 +61,7 @@ class Config:
     # ===== 训练参数 =====
     BATCH_SIZE: int = 4
     ACCUMULATION_STEPS: int = 1
-    LEARNING_RATE: float = 2e-4
+    LEARNING_RATE: float = 5e-5  # 降低 LR 防止几何指纹融合训练发散
     NUM_EPOCHS: int = 300
     SEED: int = 42
 
