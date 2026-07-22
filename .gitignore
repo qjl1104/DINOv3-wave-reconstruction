@@ -55,3 +55,20 @@ desktop.ini
 camera_calibration/params/*.txt
 Liu/SuperPoint-master/settings/DATA_PATH/
 Liu/SuperPoint-master/pretrained_models/
+
+# Virtual env & external repos
+.venv_fs/
+FoundationStereo/
+foundation_stereo_test/
+SuperGluePretrainedNetwork/
+
+# Generated artifacts (rerun scripts to regenerate)
+logs/
+runs/
+wave_modeling/real_run/
+*.log
+*.pkl
+*.zip
+thesis_extract.txt
+paper_binocular_extract.txt
+prep_*.jpg

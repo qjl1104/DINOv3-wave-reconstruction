@@ -153,12 +153,15 @@ class PINNPhysicsLoss(nn.Module):
         loss = (F.smooth_l1_loss(val_l, val_r, reduction='none') * weights).sum() / weight_sum
         return loss
 
-    def forward(self, lg, rg, kpl, kpr, scores, Q, correlation_probs=None):
+    def forward(self, lg, rg, kpl, kpr, scores, Q, correlation_probs=None,
+                disparity=None, kpr_actual=None, disparity_rev=None):
         """计算所有损失。
 
         Args:
             correlation_probs: Sinkhorn 软分配矩阵列表，每个元素 [n_kp, Wf]。
-                              为 None 时跳过相关体损失（兼容旧调用）。
+            disparity: 模型预测的左→右视差 [B, N]，用于 NCC 验证和视差范围先验。
+            kpr_actual: 右图实际关键点 [B, N_r, 2]，用于左右一致性。
+            disparity_rev: 右→左反向视差 [B, N_r]，用于左右一致性。
         """
         l_disp = self.compute_disp_loss(kpl, kpr, scores)
         l_smooth, l_slope, l_zeromean = self.compute_pinn(kpl, kpr, scores, Q)
@@ -167,7 +170,21 @@ class PINNPhysicsLoss(nn.Module):
         if correlation_probs is not None and len(correlation_probs) > 0:
             l_corr = self.compute_correlation_loss(correlation_probs)
 
-        return l_disp, l_smooth, l_slope, l_zeromean, l_corr
+        # 反捷径损失
+        l_ncc = torch.tensor(0.0, device=kpl.device)
+        l_range = torch.tensor(0.0, device=kpl.device)
+        l_lr = torch.tensor(0.0, device=kpl.device)
+
+        if disparity is not None:
+            l_ncc = self.compute_ncc_match_loss(lg, rg, kpl, disparity, scores)
+            l_range = self.compute_disp_range_loss(disparity, scores)
+
+        if disparity is not None and disparity_rev is not None and kpr_actual is not None:
+            l_lr = self.compute_lr_consistency_loss(
+                kpl, disparity, kpr_actual, disparity_rev, scores
+            )
+
+        return l_disp, l_smooth, l_slope, l_zeromean, l_corr, l_ncc, l_range, l_lr
 
     def compute_photometric(self, lg, rg, kpl, kpr, scores):
         disp = kpl[..., 0] - kpr[..., 0]
@@ -250,3 +267,134 @@ class PINNPhysicsLoss(nn.Module):
         points_3d = self.disparity_to_3d(kpl_f, disp_f, Q_f)
         l_smooth, l_slope, l_zeromean = self.compute_pinn_loss(points_3d, scores.float())
         return l_smooth, l_slope, l_zeromean
+
+    def compute_ncc_match_loss(self, lg, rg, kpl, disparity, scores):
+        """NCC 匹配验证损失：在模型预测的匹配位置计算归一化互相关。
+
+        核心思路：如果模型预测的视差正确，左图 patch 和右图对应 patch 应该高度相似（NCC≈1）。
+        如果模型走捷径预测 disp≈0，左右 patch 对应不同的小圆片，NCC≈0 → 被惩罚。
+
+        重要修复：零视差时 NCC 退化（同位置采样 → NCC=1 反而奖励捷径）。
+        所以只在 disp >= DISP_MIN_PRIOR 时计算 NCC，零视差交由 disp_range_loss 惩罚。
+        """
+        B, N, _ = kpl.shape
+        device = kpl.device
+        ps = self.patch_size
+
+        # 在 fp32 下计算以保证数值稳定性
+        with torch.amp.autocast('cuda', enabled=False):
+            lg_f = lg.float()
+            rg_f = rg.float()
+            kpl_f = kpl.float()
+            disp_f = disparity.float()
+            scores_f = scores.float()
+
+            # 构造右图匹配位置：right_x = left_x - disp
+            kpr_pred = kpl_f.clone()
+            kpr_pred[..., 0] = kpl_f[..., 0] - disp_f
+
+            # 采样左右 patch
+            patches_l = self.sample_patches(lg_f, kpl_f, ps)  # [B, C, N, ps, ps]
+            patches_r = self.sample_patches(rg_f, kpr_pred, ps)
+
+            # 展开并归一化（NCC = 归一化后的点积）
+            C = patches_l.shape[1]
+            pl = patches_l.reshape(B, C, N, -1)  # [B, C, N, ps*ps]
+            pr = patches_r.reshape(B, C, N, -1)
+
+            # 逐 patch 去均值 + L2 归一化
+            pl_norm = F.normalize(pl - pl.mean(dim=-1, keepdim=True), dim=-1)
+            pr_norm = F.normalize(pr - pr.mean(dim=-1, keepdim=True), dim=-1)
+
+            # NCC 值域 [-1, 1]，越接近 1 越匹配
+            ncc = (pl_norm * pr_norm).sum(dim=-1).mean(dim=1)  # [B, N]
+
+            # 损失 = 1 - NCC（加权 by scores）
+            loss_per_pt = (1.0 - ncc)  # [B, N]
+
+            # 关键：只在 disp >= DISP_MIN_PRIOR 时启用 NCC 损失
+            # disp < DISP_MIN_PRIOR 时返回 0（交由 disp_range_loss 惩罚）
+            # 否则零视差时 NCC=1 反而 reward 捷径
+            valid_ncc_mask = (disp_f >= self.cfg.DISP_MIN_PRIOR).float()
+            effective_weight = scores_f * valid_ncc_mask
+
+            weight_sum = effective_weight.sum()
+            if weight_sum < 1e-4:
+                return lg_f.sum() * 0.0
+
+            loss = (loss_per_pt * effective_weight).sum() / weight_sum
+
+        return loss
+
+    def compute_disp_range_loss(self, disparity, scores):
+        """视差范围先验损失：惩罚视差超出物理合理范围。
+
+        基于 Q 矩阵: fB ≈ 3,718,679
+        Z=2000mm → d≈1859, Z=15000mm → d≈248
+        合理范围 [DISP_MIN_PRIOR, DISP_MAX_PRIOR]
+        """
+        disp_min = self.cfg.DISP_MIN_PRIOR
+        disp_max = self.cfg.DISP_MAX_PRIOR
+
+        # 软惩罚：超出范围的部分用 relu
+        penalty_low = F.relu(disp_min - disparity)    # 视差太小 → 太远
+        penalty_high = F.relu(disparity - disp_max)   # 视差太大 → 太近
+
+        penalty = penalty_low + penalty_high
+
+        weight_sum = scores.sum()
+        if weight_sum < 1e-4:
+            return disparity.sum() * 0.0
+
+        return (penalty * scores).sum() / weight_sum
+
+    def compute_lr_consistency_loss(self, kpl, disp_lr, kpr, disp_rl, scores):
+        """左右一致性损失：正向和反向匹配应该一致。
+
+        对于左图关键点 i（视差 disp_lr[i]）：
+          → 右图匹配位置: x_r = kpl[i].x - disp_lr[i]
+          → 找最近的右图关键点 j
+          → 反向视差 disp_rl[j] 应满足: disp_lr[i] + disp_rl[j] ≈ 0
+
+        注意：反向视差的符号约定是 right_col - left_match_col，
+        所以一致时 disp_lr + disp_rl ≈ 0。
+        """
+        B, N, _ = kpl.shape
+        device = kpl.device
+        total_loss = 0.0
+        valid_batches = 0
+
+        for b in range(B):
+            kp_l = kpl[b]  # [N, 2]
+            d_lr = disp_lr[b]  # [N]
+            sc = scores[b]  # [N]
+            kp_r = kpr[b]  # [N_r, 2]
+            d_rl = disp_rl[b]  # [N_r]
+
+            valid = sc > 0.1
+            if valid.sum() < 5 or kp_r.shape[0] < 5:
+                continue
+
+            kp_l_v = kp_l[valid]
+            d_lr_v = d_lr[valid]
+
+            # 左图关键点在右图的预测位置
+            right_x_pred = kp_l_v[:, 0] - d_lr_v  # [M]
+
+            # 找每个预测位置最近的右图关键点
+            # right_x_pred: [M], kp_r[:, 0]: [N_r]
+            diff = right_x_pred.unsqueeze(1) - kp_r[:, 0].unsqueeze(0)  # [M, N_r]
+            nearest_idx = diff.abs().argmin(dim=1)  # [M]
+
+            # 取对应右图关键点的反向视差
+            d_rl_nearest = d_rl[nearest_idx]  # [M]
+
+            # 一致性: disp_lr + disp_rl ≈ 0
+            consistency = (d_lr_v + d_rl_nearest).abs()
+
+            total_loss += consistency.mean()
+            valid_batches += 1
+
+        if valid_batches == 0:
+            return kpl.sum() * 0.0
+        return total_loss / valid_batches

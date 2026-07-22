@@ -94,6 +94,7 @@ class Trainer:
         self.history = {
             'total_loss': [], 'corr_loss': [], 'disp_loss': [],
             'smooth_loss': [], 'slope_loss': [], 'mean_loss': [],
+            'ncc_loss': [], 'range_loss': [], 'lr_loss': [],
             'val_loss': [], 'lr': [],
         }
         self.best_val_loss = float('inf')
@@ -198,9 +199,13 @@ class Trainer:
             kpr_pred = out['keypoints_right_pred']
             scores = out['scores_left']
             corr_probs = out['correlation_probs']
+            disparity = out['disparity']
+            kpr_actual = out['keypoints_right']
+            disparity_rev = out.get('disparity_reverse')
 
-        l_disp, l_smooth, l_slope, l_zeromean, l_corr = self.loss_fn(
-            lg, rg, kpl, kpr_pred, scores, Q, corr_probs
+        l_disp, l_smooth, l_slope, l_zeromean, l_corr, l_ncc, l_range, l_lr = self.loss_fn(
+            lg, rg, kpl, kpr_pred, scores, Q, corr_probs,
+            disparity=disparity, kpr_actual=kpr_actual, disparity_rev=disparity_rev
         )
 
         w_corr = self.cfg.CORRELATION_WEIGHT * l_corr
@@ -208,8 +213,11 @@ class Trainer:
         w_smooth = self.cfg.PHY_SMOOTH_WEIGHT * l_smooth
         w_slope = self.cfg.PHY_SLOPE_WEIGHT * l_slope
         w_zero = self.cfg.PHY_ZEROMEAN_WEIGHT * l_zeromean
+        w_ncc = self.cfg.NCC_MATCH_WEIGHT * l_ncc
+        w_range = self.cfg.DISP_RANGE_WEIGHT * l_range
+        w_lr = self.cfg.LR_CONSISTENCY_WEIGHT * l_lr
 
-        total = w_corr + w_disp + w_smooth + w_slope + w_zero
+        total = w_corr + w_disp + w_smooth + w_slope + w_zero + w_ncc + w_range + w_lr
 
         loss_dict = {
             'total': total.item(),
@@ -218,6 +226,9 @@ class Trainer:
             'smooth': l_smooth.item(),
             'slope': l_slope.item(),
             'mean': l_zeromean.item(),
+            'ncc': l_ncc.item(),
+            'range': l_range.item(),
+            'lr': l_lr.item(),
         }
         return total, loss_dict
 
@@ -238,6 +249,9 @@ class Trainer:
             print(f"    - Corr:  {loss_dict['corr']:.4f}")
             print(f"    - Disp:  {loss_dict['disp']:.4f}")
             print(f"    - Phy:   {loss_dict['smooth']:.4f} + {loss_dict['slope']:.4f} + {loss_dict['mean']:.4f}")
+            print(f"    - NCC:   {loss_dict['ncc']:.4f}")
+            print(f"    - Range: {loss_dict['range']:.4f}")
+            print(f"    - LR:    {loss_dict['lr']:.4f}")
 
             if total.item() > 50.0:
                 print("\n[警告] 初始 Loss 异常高 (>50)！检查模型/数据。")
@@ -251,7 +265,7 @@ class Trainer:
     def _train_one_epoch(self, epoch):
         """Run one training epoch. Returns average loss dict."""
         self.model.train()
-        ep_stats = {k: 0.0 for k in ['total', 'corr', 'disp', 'smooth', 'slope', 'mean']}
+        ep_stats = {k: 0.0 for k in ['total', 'corr', 'disp', 'smooth', 'slope', 'mean', 'ncc', 'range', 'lr']}
         count = 0
         self.optimizer.zero_grad()
 
@@ -288,7 +302,8 @@ class Trainer:
                 pbar.set_postfix({
                     'Loss': f"{loss_dict['total']:.1f}",
                     'Corr': f"{loss_dict['corr']:.3f}",
-                    'Sm': f"{loss_dict['smooth']:.2f}",
+                    'NCC': f"{loss_dict['ncc']:.3f}",
+                    'LR_c': f"{loss_dict['lr']:.2f}",
                     'LR': f"{self.optimizer.param_groups[0]['lr']:.2e}",
                 })
             except (torch.AcceleratorError, RuntimeError) as e:
@@ -367,16 +382,16 @@ class Trainer:
     def plot_history(self):
         """Generate loss history plots."""
         epochs = range(1, len(self.history['total_loss']) + 1)
-        plt.figure(figsize=(20, 5))
+        plt.figure(figsize=(24, 5))
 
         # Total Loss
-        plt.subplot(1, 4, 1)
+        plt.subplot(1, 5, 1)
         plt.plot(epochs, self.history['total_loss'], label='Total', color='black')
         plt.title('Total Loss')
         plt.grid(True, alpha=0.3)
 
         # Geometric
-        plt.subplot(1, 4, 2)
+        plt.subplot(1, 5, 2)
         plt.plot(epochs, self.history['corr_loss'], label='Corr', color='blue')
         plt.plot(epochs, self.history['disp_loss'], label='Disparity', color='purple')
         plt.title('Geometric')
@@ -384,7 +399,7 @@ class Trainer:
         plt.grid(True, alpha=0.3)
 
         # Physics
-        plt.subplot(1, 4, 3)
+        plt.subplot(1, 5, 3)
         plt.plot(epochs, self.history['smooth_loss'], label='Smooth', color='green')
         plt.plot(epochs, self.history['slope_loss'], label='Slope', color='red')
         plt.plot(epochs, self.history['mean_loss'], label='ZeroMean', color='orange')
@@ -392,8 +407,18 @@ class Trainer:
         plt.legend()
         plt.grid(True, alpha=0.3)
 
+        # Anti-shortcut losses
+        plt.subplot(1, 5, 4)
+        if self.history.get('ncc_loss'):
+            plt.plot(epochs, self.history['ncc_loss'], label='NCC', color='cyan')
+            plt.plot(epochs, self.history['range_loss'], label='DispRange', color='magenta')
+            plt.plot(epochs, self.history['lr_loss'], label='LR-Consist', color='brown')
+        plt.title('Anti-shortcut')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
         # LR + Val
-        plt.subplot(1, 4, 4)
+        plt.subplot(1, 5, 5)
         if self.history['val_loss']:
             val_epochs = [i * 5 for i in range(1, len(self.history['val_loss']) + 1)]
             plt.plot(val_epochs, self.history['val_loss'], 'ro-', label='Val Loss')
@@ -426,6 +451,9 @@ class Trainer:
                 self.history['smooth_loss'].append(avg_losses['smooth'])
                 self.history['slope_loss'].append(avg_losses['slope'])
                 self.history['mean_loss'].append(avg_losses['mean'])
+                self.history['ncc_loss'].append(avg_losses.get('ncc', 0.0))
+                self.history['range_loss'].append(avg_losses.get('range', 0.0))
+                self.history['lr_loss'].append(avg_losses.get('lr', 0.0))
                 self.history['lr'].append(self.optimizer.param_groups[0]['lr'])
 
                 self.scheduler.step()

@@ -355,14 +355,15 @@ class CorrMatchingStereoModel(nn.Module):
                 disp_feat = cols.float() - expected_col
                 disp_pixel = disp_feat * patch_size
                 # 钳制视差范围，防止极端值导致 3D 重建坐标爆炸 → cdist 显存飙升
-                disp_pixel = disp_pixel.clamp(-512, 512)
+                # 上限 2048 对应 Z≈1816mm（足够覆盖最近水面），下限 -512 允许少量数值波动
+                disp_pixel = disp_pixel.clamp(-512, 2048)
 
                 kp_indices_original = valid_kp.nonzero(as_tuple=True)[0][kp_indices_in_valid]
                 disp_map[b, kp_indices_original] = disp_pixel
 
         return disp_map, prob_list
 
-    def forward(self, lg, rg, lrgb, rrgb, mask, cached_data=None):
+    def forward(self, lg, rg, lrgb, rrgb, mask, cached_data=None, reverse_match=True):
         if cached_data is not None:
             feat_l = cached_data['feat_left']
             feat_r = cached_data['feat_right']
@@ -379,6 +380,7 @@ class CorrMatchingStereoModel(nn.Module):
         feat_l_proj = self.proj(feat_l)
         feat_r_proj = self.proj(feat_r)
 
+        # 正向匹配：左 → 右
         disparity, prob_list = self.compute_correlation_at_keypoints(
             feat_l_proj, feat_r_proj, kpl, kpr
         )
@@ -386,7 +388,7 @@ class CorrMatchingStereoModel(nn.Module):
         kp_right_x = kpl[:, :, 0] - disparity
         kp_right_pred = torch.stack([kp_right_x, kpl[:, :, 1]], dim=-1)
 
-        return {
+        result = {
             'keypoints_left': kpl,
             'scores_left': sl,
             'keypoints_right': kpr,
@@ -396,3 +398,12 @@ class CorrMatchingStereoModel(nn.Module):
             'match_scores': sl.unsqueeze(-1),
             'correlation_probs': prob_list,  # Sinkhorn 软分配矩阵列表
         }
+
+        # 反向匹配：右 → 左（用于左右一致性损失）
+        if reverse_match:
+            disparity_rev, _ = self.compute_correlation_at_keypoints(
+                feat_r_proj, feat_l_proj, kpr, kpl
+            )
+            result['disparity_reverse'] = disparity_rev
+
+        return result

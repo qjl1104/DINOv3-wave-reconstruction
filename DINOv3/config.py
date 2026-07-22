@@ -61,7 +61,7 @@ class Config:
     # ===== 训练参数 =====
     BATCH_SIZE: int = 4
     ACCUMULATION_STEPS: int = 1
-    LEARNING_RATE: float = 5e-5  # 降低 LR 防止几何指纹融合训练发散
+    LEARNING_RATE: float = 1e-4  # NCC 已关闭，回到稳定 LR 让 Corr 主导优化
     NUM_EPOCHS: int = 300
     SEED: int = 42
 
@@ -73,6 +73,18 @@ class Config:
     PHY_SLOPE_WEIGHT: float = 0.3
     PHY_ZEROMEAN_WEIGHT: float = 0.05
     PATCH_SIZE_PHOTOMETRIC: int = 11
+
+    # ===== 新增：反捷径损失 =====
+    # NCC 匹配验证：诊断发现 11x11 patch 在像素级无判别信号（NCC(预测)≈NCC(随机)）
+    # 暂时关闭，改为依赖 Corr loss（DINO 特征级匹配，已证明有效）
+    NCC_MATCH_WEIGHT: float = 0.0
+    # 左右一致性：量级大（~150），权重需小
+    LR_CONSISTENCY_WEIGHT: float = 0.02
+    # 视差范围先验：基于 Q 矩阵 fB≈3,718,679，Z=2000→d≈1859, Z=15000→d≈248
+    # 量级大（~70），已达到避捷径效果，权重可小
+    DISP_RANGE_WEIGHT: float = 0.02
+    DISP_MIN_PRIOR: float = 100.0   # 最小视差（对应 Z_max ≈ 37000mm）
+    DISP_MAX_PRIOR: float = 2000.0  # 最大视差（对应 Z_min ≈ 1860mm）
 
     # ===== PINN 物理约束参数 =====
     DEPTH_MIN: float = 100.0

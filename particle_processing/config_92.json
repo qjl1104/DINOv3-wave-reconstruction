@@ -1,0 +1,39 @@
+{
+  "calibration_file": "../camera_calibration/params/stereo_calib_params_from_matlab_full.npz",
+  "left_image_dir": "../data/left_images/",
+  "right_image_dir": "../data/right_images/",
+  "bg_left_path": "../data/preprocessed/background_left.png",
+  "bg_right_path": "../data/preprocessed/background_right.png",
+  "output_left_dir": "../data/preprocessed_92/left/",
+  "output_right_dir": "../data/preprocessed_92/right/",
+  "crop_to_roi": false,
+  "gaussian_blur_size": [
+    5,
+    5
+  ],
+  "save_intermediate": false,
+  "num_workers": 10,
+  "clahe": {
+    "enabled": true,
+    "clipLimit": 4.0,
+    "tileGridSize": [
+      8,
+      8
+    ]
+  },
+  "foam_removal": {
+    "enabled": true,
+    "fixed_threshold": 68,
+    "min_particle_area": 8,
+    "opening_kernel_size": 3,
+    "closing_kernel_size": 3,
+    "erosion_iterations": 1,
+    "min_marker_intensity": 80,
+    "min_ellipse_score": 0.8,
+    "min_solidity": 0.85,
+    "max_aspect_ratio": 8.0,
+    "min_bright_pixels_ratio": 0.02,
+    "use_multi_stage": true,
+    "adaptive_threshold": false
+  }
+}
