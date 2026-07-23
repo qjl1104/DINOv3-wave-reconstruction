@@ -1,13 +1,18 @@
 """
 DINOv3 Wave Reconstruction - Loss Functions
 =============================================
-PINN (Physics-Informed Neural Network) loss with:
-  - Photometric loss (patch-based + intensity penalty)
-  - Disparity regularization (negative disparity penalty)
-  - Physics constraints (smoothness, slope, zero-mean)
+PINN (Physics-Informed Neural Network) loss，当前实际计算的损失：
+  - 相关体损失（Sinkhorn 软分配的熵 + 峰度，匹配监督的主力）
+  - 视差正则化（惩罚负视差/交叉匹配，使用未钳制的原始视差）
+  - 视差范围先验（惩罚超出物理合理范围的视差，使用原始视差）
+  - NCC 匹配验证（当前权重为 0，保留作诊断）
+  - 左右一致性（正向 + 反向视差应互相抵消，使用钳制后视差）
+  - PINN 物理约束（平滑、斜率、零均值，基于钳制后视差的 3D 重建）
 
-Note: Epipolar constraint is enforced by architecture (same-row matching),
-so no explicit epipolar y-diff loss is needed.
+注意：
+  - 光度损失已废弃（PHOTOMETRIC_WEIGHT=0.0，水面不满足亮度恒定假设），
+    compute_photometric 仅为保留代码，不参与训练。
+  - 极线约束由架构保证（同行匹配），无需显式的极线 y 差损失。
 """
 
 import torch
@@ -38,7 +43,8 @@ class PINNPhysicsLoss(nn.Module):
         points_4d = torch.cat([keypoints, disp_unsqueezed, ones], dim=-1)
         projected = torch.matmul(points_4d, Q.transpose(1, 2))
         X, Y, Z, W = projected.unbind(-1)
-        W = torch.clamp(W, min=1e-6)
+        # 取绝对值再钳制：避免把小的负 W 映射到 +1e-6，导致 3D 坐标爆炸且符号翻转
+        W = W.abs().clamp(min=1e-6)
         points_3d = torch.stack([X / W, Y / W, Z / W], dim=-1)
         return points_3d
 
@@ -154,16 +160,25 @@ class PINNPhysicsLoss(nn.Module):
         return loss
 
     def forward(self, lg, rg, kpl, kpr, scores, Q, correlation_probs=None,
-                disparity=None, kpr_actual=None, disparity_rev=None):
+                disparity=None, kpr_actual=None, disparity_rev=None,
+                disparity_raw=None):
         """计算所有损失。
 
         Args:
             correlation_probs: Sinkhorn 软分配矩阵列表，每个元素 [n_kp, Wf]。
-            disparity: 模型预测的左→右视差 [B, N]，用于 NCC 验证和视差范围先验。
+            disparity: 模型预测的左→右视差 [B, N]（已按方向感知钳制），
+                用于左右一致性配对。
+            disparity_raw: 未钳制的左→右视差 [B, N]，用于视差监督类损失
+                （视差范围先验、负视差惩罚、NCC 验证）。clamp 区间外梯度为零，
+                监督损失必须用原始值才能拉回越界预测；为 None 时退化为 disparity。
             kpr_actual: 右图实际关键点 [B, N_r, 2]，用于左右一致性。
-            disparity_rev: 右→左反向视差 [B, N_r]，用于左右一致性。
+            disparity_rev: 右→左反向视差 [B, N_r]（已钳制），用于左右一致性。
         """
-        l_disp = self.compute_disp_loss(kpl, kpr, scores)
+        # 视差监督用未钳制的原始值；kpr（= keypoints_right_pred）由钳制值构造，
+        # 继续供 PINN 3D 路径使用
+        disp_sup = disparity_raw if disparity_raw is not None else disparity
+
+        l_disp = self.compute_disp_loss(kpl, kpr, scores, disparity=disp_sup)
         l_smooth, l_slope, l_zeromean = self.compute_pinn(kpl, kpr, scores, Q)
 
         l_corr = torch.tensor(0.0, device=kpl.device)
@@ -175,9 +190,9 @@ class PINNPhysicsLoss(nn.Module):
         l_range = torch.tensor(0.0, device=kpl.device)
         l_lr = torch.tensor(0.0, device=kpl.device)
 
-        if disparity is not None:
-            l_ncc = self.compute_ncc_match_loss(lg, rg, kpl, disparity, scores)
-            l_range = self.compute_disp_range_loss(disparity, scores)
+        if disp_sup is not None:
+            l_ncc = self.compute_ncc_match_loss(lg, rg, kpl, disp_sup, scores)
+            l_range = self.compute_disp_range_loss(disp_sup, scores)
 
         if disparity is not None and disparity_rev is not None and kpr_actual is not None:
             l_lr = self.compute_lr_consistency_loss(
@@ -202,9 +217,18 @@ class PINNPhysicsLoss(nn.Module):
         l_photo = l_masked + l_intensity
         return l_photo, l_disp
 
-    def compute_disp_loss(self, kpl, kpr, scores):
-        """视差正则化损失：惩罚负视差（交叉匹配）。"""
-        disp = kpl[..., 0] - kpr[..., 0]
+    def compute_disp_loss(self, kpl, kpr, scores, disparity=None):
+        """视差正则化损失：惩罚负视差（交叉匹配）。
+
+        Args:
+            disparity: 可选，模型预测的未钳制原始视差 [B, N]。提供时直接
+                使用它（kpr 由钳制值构造，从 kpl.x - kpr.x 反推会被 clamp
+                截断惩罚幅度并丢失越界梯度）；否则退回旧行为 kpl.x - kpr.x。
+        """
+        if disparity is not None:
+            disp = disparity
+        else:
+            disp = kpl[..., 0] - kpr[..., 0]
         weight_sum = scores.sum()
         neg_disp_penalty = F.relu(-disp) * 0.1
         if weight_sum > 1e-4:
@@ -353,7 +377,7 @@ class PINNPhysicsLoss(nn.Module):
 
         对于左图关键点 i（视差 disp_lr[i]）：
           → 右图匹配位置: x_r = kpl[i].x - disp_lr[i]
-          → 找最近的右图关键点 j
+          → 找最近的右图关键点 j（2D 欧氏距离，忽略零填充行）
           → 反向视差 disp_rl[j] 应满足: disp_lr[i] + disp_rl[j] ≈ 0
 
         注意：反向视差的符号约定是 right_col - left_match_col，
@@ -372,22 +396,27 @@ class PINNPhysicsLoss(nn.Module):
             d_rl = disp_rl[b]  # [N_r]
 
             valid = sc > 0.1
-            if valid.sum() < 5 or kp_r.shape[0] < 5:
-                continue
+            # 右图关键点按 batch 零填充：先剔除 (0,0) 填充行，
+            # 否则最近邻搜索会选中填充点，且数量判断会把填充也算进去
+            valid_r = (kp_r[:, 0] != 0) | (kp_r[:, 1] != 0)
+            if valid.sum() < 5 or valid_r.sum() < 5:
+                continue  # 填充过多/全填充的样本跳过该损失
 
             kp_l_v = kp_l[valid]
             d_lr_v = d_lr[valid]
+            kp_r_v = kp_r[valid_r]  # [M_r, 2] 仅真实关键点
+            d_rl_v = d_rl[valid_r]  # [M_r]
 
-            # 左图关键点在右图的预测位置
-            right_x_pred = kp_l_v[:, 0] - d_lr_v  # [M]
+            # 左图关键点在右图的预测位置（x 由视差给出，y 同行不变）
+            right_pred = torch.stack([kp_l_v[:, 0] - d_lr_v, kp_l_v[:, 1]], dim=-1)  # [M, 2]
 
-            # 找每个预测位置最近的右图关键点
-            # right_x_pred: [M], kp_r[:, 0]: [N_r]
-            diff = right_x_pred.unsqueeze(1) - kp_r[:, 0].unsqueeze(0)  # [M, N_r]
-            nearest_idx = diff.abs().argmin(dim=1)  # [M]
+            # 找每个预测位置最近的右图关键点（2D 欧氏距离，含 y 坐标）
+            diff = right_pred.unsqueeze(1) - kp_r_v.unsqueeze(0)  # [M, M_r, 2]
+            dist2 = (diff ** 2).sum(dim=-1)  # [M, M_r]
+            nearest_idx = dist2.argmin(dim=1)  # [M]
 
             # 取对应右图关键点的反向视差
-            d_rl_nearest = d_rl[nearest_idx]  # [M]
+            d_rl_nearest = d_rl_v[nearest_idx]  # [M]
 
             # 一致性: disp_lr + disp_rl ≈ 0
             consistency = (d_lr_v + d_rl_nearest).abs()

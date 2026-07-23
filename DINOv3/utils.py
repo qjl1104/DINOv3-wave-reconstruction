@@ -95,12 +95,26 @@ def load_model_checkpoint(model, path, device, strict=False):
     Load a checkpoint into a model, supporting both old (pure state_dict)
     and new (dict with 'model_state_dict') formats.
 
+    strict=False 时打印完整的缺失/多余键列表；若缺失键包含 proj/geo_fusion
+    （分支前 checkpoint 没有这些层），打印醒目警告：投影头为随机初始化。
+
     Returns:
         The loaded checkpoint dict (or state_dict).
     """
     checkpoint = torch.load(path, map_location=device, weights_only=False)
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
+        missing, unexpected = model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
     else:
-        model.load_state_dict(checkpoint, strict=strict)
+        missing, unexpected = model.load_state_dict(checkpoint, strict=strict)
+
+    if not strict:
+        if missing:
+            print(f"[Checkpoint] 缺失键 ({len(missing)}): {list(missing)}")
+        if unexpected:
+            print(f"[Checkpoint] 多余键 ({len(unexpected)}): {list(unexpected)}")
+        if any(k.startswith('proj') or k.startswith('geo_fusion') for k in missing):
+            print("!" * 60)
+            print("[警告] 该 checkpoint 早于 geo_fusion 架构：proj.*/geo_fusion.* 权重缺失，")
+            print("[警告] 投影头与几何融合层为随机初始化，推理/微调结果将不可靠！")
+            print("!" * 60)
     return checkpoint

@@ -49,10 +49,10 @@ class Config:
     BLOB_MAX_AREA: float = 2500.0
 
     # ===== 模型架构参数 =====
-    FEATURE_DIM: int = 768
     CORR_PROJ_DIM: int = 128
-    MATCHING_TEMPERATURE: float = 15.0
-    EPIPOLAR_THRESHOLD: float = 3.0
+    # 注：旧参数 FEATURE_DIM / MATCHING_TEMPERATURE / EPIPOLAR_THRESHOLD 已删除——
+    # 特征维度取自 DINO 模型 config，温度为可学习参数（models.py 的 self.temperature），
+    # 极线约束由同行匹配的架构保证，均不再需要配置项。
 
     # ===== 几何指纹参数（DINO + 几何融合） =====
     GEO_KNN_K: int = 8          # 几何指纹的近邻数量
@@ -83,7 +83,8 @@ class Config:
     # 视差范围先验：基于 Q 矩阵 fB≈3,718,679，Z=2000→d≈1859, Z=15000→d≈248
     # 量级大（~70），已达到避捷径效果，权重可小
     DISP_RANGE_WEIGHT: float = 0.02
-    DISP_MIN_PRIOR: float = 100.0   # 最小视差（对应 Z_max ≈ 37000mm）
+    # 换算 Z = fB/disp（fB≈3.72e6）：d=100 → Z≈37200mm；d=2000 → Z≈1860mm
+    DISP_MIN_PRIOR: float = 100.0   # 最小视差（对应 Z≈37200mm，略宽于 DEPTH_MAX=30000 的软边界）
     DISP_MAX_PRIOR: float = 2000.0  # 最大视差（对应 Z_min ≈ 1860mm）
 
     # ===== PINN 物理约束参数 =====

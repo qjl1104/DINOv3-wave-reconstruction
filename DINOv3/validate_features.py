@@ -6,7 +6,9 @@ DINOv3 特征区分度验证脚本
 验证维度：
   1. 背景 vs 小圆片区域的特征差异（特征是否"看到"了小圆片）
   2. 小圆片之间的特征区分度（不同小圆片的特征是否不同）
-  3. 跨视图一致性（同一物理点，左右特征是否相似）
+  3. 同列特征相似度 / 特征平滑性（左图关键点列 vs 右图同列——并非真实
+     物理对应点，因为存在 250~1900px 视差；该维度检验的是特征沿极线
+     方向的平滑性/平移不变性，而非跨视图对应关系）
   4. 密度-区分度关系（小圆片密度越高，特征是否越有区分度）
   5. 多帧统计稳定性
 
@@ -159,8 +161,12 @@ def analyze_dot_discriminability(feat_l, kp_l, patch_size=16):
 
 def analyze_cross_view_consistency(feat_l, feat_r, kp_l, kp_r, patch_size=16):
     """
-    左右图同一物理位置的特征应该相似（通过极线约束）。
-    比较：极线对应位置 vs 随机偏移位置。
+    检验左图关键点所在列与右图同一列的特征相似度（同行同列）。
+
+    注意：这里比较的是左右图的同一特征列，由于存在 250~1900px 的视差，
+    同一列并不是同一个物理点。因此该维度实际检验的是特征沿极线方向的
+    平滑性/平移不变性（同列相似度应高于随机列），而不是真实的跨视图
+    对应关系——后者需要已知匹配真值才能验证。
     """
     row_l, col_l, valid_l = get_kp_feature_grid(feat_l, kp_l, patch_size)
     row_r, col_r, valid_r = get_kp_feature_grid(feat_r, kp_r, patch_size)
@@ -186,7 +192,8 @@ def analyze_cross_view_consistency(feat_l, feat_r, kp_l, kp_r, patch_size=16):
         # 同一行右图特征
         feats_r_row = feat_r[:, r, :].T  # [Wf, C]
 
-        # 极线对应：左图第 col 列 vs 右图第 col 列（矫正后匹配点在同一列）
+        # 同列对比：左图第 col 列 vs 右图第 col 列（同列而非真实匹配点，
+        # 衡量特征沿极线的平滑性：相邻区域特征应比随机列更相似）
         feats_l_norm = F.normalize(feats_l_row, dim=-1)
         feats_r_norm = F.normalize(feats_r_row, dim=-1)
 
@@ -236,9 +243,11 @@ def analyze_density_discriminability(feat_l, kp_l, patch_size=16):
     cell_w = Wf // grid_w
 
     densities = []
+    cell_mean_sims = []  # 与 densities 一一对应的每格平均相似度
     high_density_sims = []
     low_density_sims = []
 
+    # 第一遍：统计每个网格的密度与平均相似度
     for gh in range(grid_h):
         for gw in range(grid_w):
             mask = (row >= gh * cell_h) & (row < (gh + 1) * cell_h) & \
@@ -251,15 +260,18 @@ def analyze_density_discriminability(feat_l, kp_l, patch_size=16):
             cell_feats = kp_features[mask]
             sim = cosine_sim_matrix(cell_feats)
             triu = sim[torch.triu(torch.ones_like(sim), diagonal=1).bool()]
-            mean_sim = triu.mean().item()
-
-            if n_in_cell >= np.median(densities) if densities else 0:
-                high_density_sims.append(mean_sim)
-            else:
-                low_density_sims.append(mean_sim)
+            cell_mean_sims.append(triu.mean().item())
 
     if not densities:
         return None
+
+    # 第二遍：用全部网格密度的中位数（只算一次）分类高/低密度区
+    density_median = np.median(densities)
+    for n_in_cell, mean_sim in zip(densities, cell_mean_sims):
+        if n_in_cell >= density_median:
+            high_density_sims.append(mean_sim)
+        else:
+            low_density_sims.append(mean_sim)
 
     return {
         'n_cells': len(densities),
@@ -375,18 +387,19 @@ def main():
         else:
             print(f"  ⚠️  多数小圆片对的特征相似度偏高，区分度不足")
 
-    # --- 维度 3：跨视图一致性 ---
+    # --- 维度 3：同列特征相似度（特征平滑性/平移不变性，非真实对应） ---
     if all_dim3:
         d3 = all_dim3[0]
         gaps = np.array([x['gap'] for x in all_dim3])
-        print(f"\n[维度 3] 跨视图一致性 ({len(all_dim3)} 帧)")
-        print(f"  极线对齐相似度:    {d3['aligned_mean']:.3f} ± {d3['aligned_std']:.3f}")
-        print(f"  随机打乱相似度:    {d3['shuffled_mean']:.3f} ± {d3['shuffled_std']:.3f}")
-        print(f"  对齐-打乱差距:     {d3['gap']:.4f} (多帧: {gaps.mean():.4f} ± {gaps.std():.4f})")
+        print(f"\n[维度 3] 同列特征相似度（特征平滑性/平移不变性，{len(all_dim3)} 帧）")
+        print(f"  注意：同列 ≠ 同一物理点（存在 250~1900px 视差），不检验真实对应关系")
+        print(f"  同列相似度:          {d3['aligned_mean']:.3f} ± {d3['aligned_std']:.3f}")
+        print(f"  随机打乱相似度:      {d3['shuffled_mean']:.3f} ± {d3['shuffled_std']:.3f}")
+        print(f"  同列-打乱差距:       {d3['gap']:.4f} (多帧: {gaps.mean():.4f} ± {gaps.std():.4f})")
         if gaps.mean() > 0.02:
-            print(f"  ✅ 左右特征在极线对齐时有显著更高的相似度，跨视图一致性成立")
+            print(f"  ✅ 同列特征显著比随机列相似，特征沿极线方向平滑（平移不变性成立）")
         else:
-            print(f"  ❌ 极线对齐与随机打乱无显著差异，左右特征空间不一致")
+            print(f"  ❌ 同列与随机打乱无显著差异，特征空间沿极线方向不平滑/判别过弱")
 
     # --- 维度 4：密度-区分度 ---
     if all_dim4:
@@ -416,7 +429,7 @@ def main():
     if all_dim2 and all_dim2[0]['sim_lt_0.5'] < 0.3:
         issues.append("小圆片间特征区分度不足（<30% 对相似度 <0.5）")
     if all_dim3 and gaps.mean() < 0.01:
-        issues.append("左右特征跨视图一致性问题（gap < 0.01）")
+        issues.append("同列特征相似度与随机列无差异（特征沿极线方向不平滑，gap < 0.01）")
     if all_dim4 and all_dim4[0]['high_density_sim_mean'] >= all_dim4[0]['low_density_sim_mean']:
         issues.append("密度-区分度关系异常")
 

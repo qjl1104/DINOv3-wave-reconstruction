@@ -139,9 +139,14 @@ class Trainer:
             ckpt = {'model_state_dict': ckpt}
         missing, unexpected = self.model.load_state_dict(ckpt['model_state_dict'], strict=False)
         if missing:
-            print(f"[Resume] 忽略缺失键: {len(missing)}")
+            print(f"[Resume] 缺失键 ({len(missing)}): {list(missing)}")
         if unexpected:
-            print(f"[Resume] 忽略多余键: {len(unexpected)}")
+            print(f"[Resume] 多余键 ({len(unexpected)}): {list(unexpected)}")
+        if any(k.startswith('proj') or k.startswith('geo_fusion') for k in missing):
+            print("!" * 60)
+            print("[警告] 该 checkpoint 早于 geo_fusion 架构：proj.*/geo_fusion.* 权重缺失，")
+            print("[警告] 投影头与几何融合层当前为随机初始化，恢复训练前请确认这是预期行为！")
+            print("!" * 60)
 
         if 'optimizer_state_dict' in ckpt:
             try:
@@ -200,12 +205,16 @@ class Trainer:
             scores = out['scores_left']
             corr_probs = out['correlation_probs']
             disparity = out['disparity']
+            # 未钳制的原始视差：视差监督类损失（range/disp/NCC）必须使用原始值，
+            # clamp 区间外梯度为零且范围先验需要看到越界的真实预测
+            disparity_raw = out.get('disparity_raw', disparity)
             kpr_actual = out['keypoints_right']
             disparity_rev = out.get('disparity_reverse')
 
         l_disp, l_smooth, l_slope, l_zeromean, l_corr, l_ncc, l_range, l_lr = self.loss_fn(
             lg, rg, kpl, kpr_pred, scores, Q, corr_probs,
-            disparity=disparity, kpr_actual=kpr_actual, disparity_rev=disparity_rev
+            disparity=disparity, kpr_actual=kpr_actual, disparity_rev=disparity_rev,
+            disparity_raw=disparity_raw
         )
 
         w_corr = self.cfg.CORRELATION_WEIGHT * l_corr
@@ -458,7 +467,7 @@ class Trainer:
 
                 self.scheduler.step()
 
-            # Validate every 5 epochs
+                # Validate every 5 epochs
                 if (epoch + 1) % 5 == 0:
                     val_loss = self._validate(epoch)
                     self.history['val_loss'].append(val_loss)

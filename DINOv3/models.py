@@ -191,7 +191,8 @@ class CorrMatchingStereoModel(nn.Module):
             P = F.softmax(log_P, dim=1)
         return P
 
-    def compute_geo_fingerprint_at_positions(self, query_positions, all_keypoints, K):
+    def compute_geo_fingerprint_at_positions(self, query_positions, all_keypoints, K,
+                                             self_indices=None):
         """
         为一组查询位置计算几何指纹（K 近邻的相对位置向量，按角度排序）。
 
@@ -204,12 +205,19 @@ class CorrMatchingStereoModel(nn.Module):
             query_positions: [Q, 2] 查询点的像素坐标
             all_keypoints:   [N, 2] 所有关键点（用于找邻居）
             K:               近邻数量
+            self_indices:    可选，[Q] 整型索引。当查询点本身就是 all_keypoints
+                             中的关键点时（左图分支），给出每个查询点在
+                             all_keypoints 中的下标，用于把自身（距离 0）排除出
+                             近邻列表；否则左图指纹会包含自身，只剩 K-1 个真实
+                             邻居，与右图密集行查询（K 个真实邻居）产生分布偏移。
+                             与 geometric_fingerprint.py 的 fill_diagonal(inf) 同理。
 
         Returns:
             fingerprints: [Q, 2*K] 每个查询点的几何指纹
         """
         Q = query_positions.shape[0]
         N = all_keypoints.shape[0]
+        # 排除自身后还剩 N-1 个候选邻居，因此需要 N >= K + 1
         if N < K + 1 or Q == 0:
             return torch.zeros(Q, 2 * K, device=query_positions.device)
 
@@ -218,13 +226,19 @@ class CorrMatchingStereoModel(nn.Module):
         diff = query_positions.unsqueeze(1) - all_keypoints.unsqueeze(0)  # [Q, N, 2]
         dists = (diff[:, :, 0] ** 2 + diff[:, :, 1] ** 2).sqrt()  # [Q, N]
 
+        # 查询点自身在关键点集合中：把自身距离置为 inf，排除出近邻
+        if self_indices is not None:
+            dists[torch.arange(Q, device=dists.device), self_indices] = float('inf')
+
         # 取 K 近邻
         _, knn_idx = dists.topk(K, dim=-1, largest=False)  # [Q, K]
 
         # 提取相对位置向量
         neighbors = diff[torch.arange(Q).unsqueeze(1), knn_idx]  # [Q, K, 2]
 
-        # 按角度排序（保证旋转不变性——旋转后所有邻居一起转，排序后指纹不变）
+        # 按角度排序：消除邻居排列顺序的歧义（邻居集合相同 → 指纹相同）。
+        # 注意这不提供旋转不变性：图像旋转后相对向量会一起旋转，指纹随之改变
+        # （本场景相机固定、水面无旋转，排序仅为规范化表示）。
         angles = torch.atan2(neighbors[:, :, 1], neighbors[:, :, 0])  # [Q, K]
         sorted_idx = torch.argsort(angles, dim=-1)  # [Q, K]
         neighbors_sorted = neighbors[torch.arange(Q).unsqueeze(1), sorted_idx]  # [Q, K, 2]
@@ -260,15 +274,28 @@ class CorrMatchingStereoModel(nn.Module):
 
         return self.compute_geo_fingerprint_at_positions(query_positions, all_keypoints, K)
 
-    def compute_correlation_at_keypoints(self, feat_l, feat_r, keypoints_l, keypoints_r):
+    def compute_correlation_at_keypoints(self, feat_l, feat_r, keypoints_l, keypoints_r,
+                                         reverse=False):
         """
         计算相关体：DINO 特征 + 几何指纹融合后做内积。
 
         相比纯 DINO 版本，这里：
           1. 对左图关键点计算几何指纹 [n_kp, 2K]
-          2. 对右图该行所有列计算几何指纹 [Wf, 2K]  
+          2. 对右图该行所有列计算几何指纹 [Wf, 2K]
           3. 与 DINO 特征拼接后通过 geo_fusion 融合
           4. 在融合特征空间计算相关体
+
+        Args:
+            reverse: False 为正向匹配（左→右，视差为正）；
+                     True 为反向匹配（右→左，视差符号相反、为负）。
+                     反向时视差钳制方向也随之翻转（见下方 clamp）。
+
+        Returns:
+            disp_map:     [B, N] 按方向感知范围钳制后的视差（供几何下游：
+                          3D 重建、左右一致性配对等）
+            disp_map_raw: [B, N] 未钳制的原始 soft-argmax 视差（供视差监督
+                          损失；clamp 区间外梯度为零，监督必须用原始值）
+            prob_list:    Sinkhorn 软分配矩阵列表
         """
         B, C, Hf, Wf = feat_l.shape
         patch_size = self.ext.patch
@@ -276,6 +303,7 @@ class CorrMatchingStereoModel(nn.Module):
         K = self.cfg.GEO_KNN_K
 
         disp_map = torch.zeros(B, N, device=feat_l.device)
+        disp_map_raw = torch.zeros(B, N, device=feat_l.device)
         prob_list = []
 
         for b in range(B):
@@ -312,10 +340,12 @@ class CorrMatchingStereoModel(nn.Module):
                 left_desc_dino = left_row[:, cols].T   # [n_kp, D]
 
                 # --- 几何指纹 ---
-                # 左图：该行关键点位置的几何指纹
+                # 左图：该行关键点位置的几何指纹（查询点即关键点本身，
+                # 传入其在关键点集合中的下标以排除自身，保证 K 个真实邻居）
                 query_positions_l = kps_l[valid_kp][kp_indices_in_valid]  # [n_kp, 2]
                 geo_fp_l = self.compute_geo_fingerprint_at_positions(
-                    query_positions_l, kps_l[valid_kp], K
+                    query_positions_l, kps_l[valid_kp], K,
+                    self_indices=kp_indices_in_valid
                 )  # [n_kp, 2K]
 
                 # 右图：该行所有列位置的几何指纹
@@ -354,14 +384,26 @@ class CorrMatchingStereoModel(nn.Module):
 
                 disp_feat = cols.float() - expected_col
                 disp_pixel = disp_feat * patch_size
-                # 钳制视差范围，防止极端值导致 3D 重建坐标爆炸 → cdist 显存飙升
-                # 上限 2048 对应 Z≈1816mm（足够覆盖最近水面），下限 -512 允许少量数值波动
-                disp_pixel = disp_pixel.clamp(-512, 2048)
 
                 kp_indices_original = valid_kp.nonzero(as_tuple=True)[0][kp_indices_in_valid]
+
+                # 未钳制的原始视差：供视差监督损失使用
+                # （clamp 区间外梯度为零，被钳住的点会失去拉回信号；
+                #   范围先验也需要看到超出边界的真实预测值）
+                disp_map_raw[b, kp_indices_original] = disp_pixel
+
+                # 钳制视差范围（仅供几何下游），防止极端值导致 3D 重建坐标
+                # 爆炸 → cdist 显存飙升。方向感知：
+                #   正向（左→右）视差为正：(-512, 2048)，上限 2048 对应 Z≈1816mm
+                #   反向（右→左）视差为负：(-2048, 512)，避免近水面点被钳到 -512
+                if reverse:
+                    disp_pixel = disp_pixel.clamp(-2048, 512)
+                else:
+                    disp_pixel = disp_pixel.clamp(-512, 2048)
+
                 disp_map[b, kp_indices_original] = disp_pixel
 
-        return disp_map, prob_list
+        return disp_map, disp_map_raw, prob_list
 
     def forward(self, lg, rg, lrgb, rrgb, mask, cached_data=None, reverse_match=True):
         if cached_data is not None:
@@ -381,8 +423,8 @@ class CorrMatchingStereoModel(nn.Module):
         feat_r_proj = self.proj(feat_r)
 
         # 正向匹配：左 → 右
-        disparity, prob_list = self.compute_correlation_at_keypoints(
-            feat_l_proj, feat_r_proj, kpl, kpr
+        disparity, disparity_raw, prob_list = self.compute_correlation_at_keypoints(
+            feat_l_proj, feat_r_proj, kpl, kpr, reverse=False
         )
 
         kp_right_x = kpl[:, :, 0] - disparity
@@ -394,16 +436,18 @@ class CorrMatchingStereoModel(nn.Module):
             'keypoints_right': kpr,
             'scores_right': sr,
             'keypoints_right_pred': kp_right_pred,
-            'disparity': disparity,
+            'disparity': disparity,            # 钳制后视差（几何下游：3D 重建/点云）
+            'disparity_raw': disparity_raw,    # 未钳制视差（视差监督损失用）
             'match_scores': sl.unsqueeze(-1),
             'correlation_probs': prob_list,  # Sinkhorn 软分配矩阵列表
         }
 
-        # 反向匹配：右 → 左（用于左右一致性损失）
+        # 反向匹配：右 → 左（用于左右一致性损失，视差为负值约定）
         if reverse_match:
-            disparity_rev, _ = self.compute_correlation_at_keypoints(
-                feat_r_proj, feat_l_proj, kpr, kpl
+            disparity_rev, disparity_rev_raw, _ = self.compute_correlation_at_keypoints(
+                feat_r_proj, feat_l_proj, kpr, kpl, reverse=True
             )
             result['disparity_reverse'] = disparity_rev
+            result['disparity_reverse_raw'] = disparity_rev_raw
 
         return result

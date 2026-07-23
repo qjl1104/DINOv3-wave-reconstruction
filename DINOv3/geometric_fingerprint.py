@@ -123,7 +123,8 @@ def knn_relative_positions(points, K=8):
     for i in range(N):
         neighbors = points[knn_indices[i]]  # [K, 2]
         rel = neighbors - points[i]  # [K, 2]
-        # 按角度排序，保证旋转不变性
+        # 按角度排序：消除邻居排列顺序的歧义（不提供旋转不变性——
+        # 图像旋转后相对向量会一起旋转，指纹随之改变，本场景相机固定无旋转）
         angles = np.arctan2(rel[:, 1], rel[:, 0])
         sort_idx = np.argsort(angles)
         rel_sorted = rel[sort_idx]
@@ -177,10 +178,17 @@ def analyze_fingerprint_discriminability(fingerprints, points, name="Fingerprint
 # 验证：几何指纹的跨视图一致性
 # ============================================================
 
-def analyze_fingerprint_cross_view(points_l, points_r, K=8):
+def analyze_fingerprint_cross_view(points_l, points_r, K=8, image_height=None, seed=0):
     """
     左右图同一物理点的几何指纹应该相似。
     验证：极线对齐位置 vs 随机偏移位置。
+
+    Args:
+        points_l, points_r: [N, 2] 左右图关键点坐标
+        K:                  近邻数量
+        image_height:       图像高度（像素），用于确定行带扫描范围；
+                            None 时从关键点最大 y 坐标推导
+        seed:               随机配对用的随机种子（保证结果可复现）
     """
     fp_l = knn_relative_positions(points_l, K=K)
     fp_r = knn_relative_positions(points_r, K=K)
@@ -188,14 +196,17 @@ def analyze_fingerprint_cross_view(points_l, points_r, K=8):
     fp_l_norm = F.normalize(torch.from_numpy(fp_l).float(), dim=-1)
     fp_r_norm = F.normalize(torch.from_numpy(fp_r).float(), dim=-1)
 
-    N_l = points_l.shape[0]
-    N_r = points_r.shape[0]
+    # 行带范围按实际图像高度确定，避免漏掉 y 较大的关键点
+    if image_height is None:
+        image_height = int(max(points_l[:, 1].max(), points_r[:, 1].max())) + 50
+
+    rng = np.random.default_rng(seed)
 
     aligned_sims = []
     shuffled_sims = []
 
     # 按极线行分组
-    for y_bin in np.arange(0, 1600, 50):  # 50px 行带
+    for y_bin in np.arange(0, image_height, 50):  # 50px 行带
         mask_l = (points_l[:, 1] >= y_bin) & (points_l[:, 1] < y_bin + 50)
         mask_r = (points_r[:, 1] >= y_bin) & (points_r[:, 1] < y_bin + 50)
 
@@ -215,7 +226,7 @@ def analyze_fingerprint_cross_view(points_l, points_r, K=8):
             aligned_sims.append(sim)
 
             # 随机配对
-            j = np.random.randint(0, len(indices_r))
+            j = rng.integers(0, len(indices_r))
             sim_shuf = (fp_l_norm[sorted_l[i]] * fp_r_norm[indices_r[j]]).sum().item()
             shuffled_sims.append(sim_shuf)
 
@@ -303,8 +314,9 @@ def main():
             'frame': fname,
         })
 
-        # 跨视图一致性
-        cv = analyze_fingerprint_cross_view(kp_l, kp_r, K=8)
+        # 跨视图一致性（行带范围按实际图像高度 = 特征图高 × patch 16 推导）
+        img_h = feat_l.shape[1] * 16
+        cv = analyze_fingerprint_cross_view(kp_l, kp_r, K=8, image_height=img_h)
         if cv:
             cv['frame'] = fname
             cross_view_knn.append(cv)
