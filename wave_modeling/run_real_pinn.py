@@ -12,8 +12,9 @@ frame（绝对帧号）, X, Y, Z（mm，相机1坐标系）。片段普遍有缺
 SVD 求点云主平面，η = 沿法向的残差（真实的波面起伏），(u,v) 为面内坐标。
 
 时间单位：pca_plane_coords 已按 FPS=50 把帧号换算为秒，c 单位即 mm/s。
-c 固定为理论值 1976 mm/s（反演不可靠；数据独立测速见
-diag_hovmoller_xcorr.py 的互谱相位法：1975 mm/s，95% CI [1867,2107]）。
+c 固定为互谱相位法实测值（--c 可覆盖；反演不可靠，见 main() 注释）。
+2026-07 三角化修复后的正确几何下实测 c≈730 mm/s——深水理论 1976 被
+数据排除（相位梯度 2.66 倍陡），按 Airy 色散对应浅水 h≈55–60mm。
 
 留出评估的泄漏防控（2026-07 评审修复）：
 - train/test 按【片段】划分（整段进一侧，固定 seed），不再随机散点划分——
@@ -42,7 +43,8 @@ PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl")
 OUT = os.path.join(ROOT, "wave_modeling/real_run")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 FPS = 50.0          # 采集帧率（刘晔恒论文：50 Hz）
-C_THEORY = 1976.0   # 理论波速 mm/s（0.79 Hz 深水规则波，λ=2.5017m）
+C_THEORY = 1976.0   # 深水理论参考值 mm/s（0.79 Hz，λ=2.5017m）——仅作对比
+                    # 锚点；本数据集实测 c≈730，该理论值已被排除（见文件头）
 
 
 def load_trajectories(pkl_path, min_len=20):
@@ -254,13 +256,17 @@ def measure_direction(series):
     c2, n2, _ = fit_cn(unw)
     print(f"[方向] 互谱相位法: c = {c2:.0f} mm/s, 方向 ({n2[0]:.3f}, {n2[1]:.3f}), "
           f"{len(raw)} 对")
-    return n2
+    return c2, n2
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    # 可用 argv[1] 指定轨迹 pkl（默认 canonical v2_dino）
-    pkl = sys.argv[1] if len(sys.argv) > 1 else PKL
+    # 可用 argv[1] 指定轨迹 pkl（默认 canonical v2_dino）；--c <mm/s> 覆盖 c 先验
+    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+    pkl = argv[0] if argv else PKL
+    c_override = None
+    if "--c" in sys.argv:
+        c_override = float(sys.argv[sys.argv.index("--c") + 1])
     print(f"[输入] {pkl}")
     # 片段级划分 + 仅训练片段拟合预处理（防泄漏，见文件头与 prepare_data_split）
     d = prepare_data_split(pkl)
@@ -268,7 +274,8 @@ def main():
     # 传播方向先验：把 (u,v) 旋转到传播坐标系（x'=ξ 沿传播，y'=ζ 垂直），
     # 波场退化为准一维行波 η(ξ,t)，各向异性 Fourier 特征更好分配。
     # 方向是全局几何先验（train/test 共用同一旋转矩阵），用全部片段估计。
-    n_dir = measure_direction(d["series_tr"] + d["series_te"])
+    md = measure_direction(d["series_tr"] + d["series_te"])
+    c_meas, n_dir = (None, None) if md is None else md
     rotated = n_dir is not None
     R = np.eye(2)
     pts_tr, pts_te = d["dedup_tr"], d["dedup_te"]
@@ -288,18 +295,30 @@ def main():
     xyt_te = torch.tensor(pts_te[:, [0, 1, 3]], dtype=torch.float32)
     eta_te = torch.tensor(pts_te[:, 2:3], dtype=torch.float32)
 
-    # c 固定为理论值：数据密度下 c 反演不可靠（曾被噪声宽带模态拖到
-    # 772 mm/s），而互谱相位法已从数据独立测得 c=1975 mm/s（95% CI
-    # [1867,2107]），与深水理论 1976 一致（见 diag_hovmoller_xcorr.py）。
+    # c 固定为互谱相位法实测值（可 --c 覆盖）：数据密度下 c 反演不可靠
+    # （曾被噪声宽带模态拖到 772 mm/s），而互谱相位法独立于 PINN 测速。
+    # 注意 2026-07 结论：三角化修复后的正确几何下 c≈730 mm/s，
+    # 深水理论 1976 被数据明确排除（沿传播向相位梯度为其 2.66 倍，
+    # 平面波表观速度不可能低于真实 c）；按 Airy 色散对应浅水 h≈55–60mm。
     # 物理损失的作用是约束时空相干性，不再承担测速任务。
+    if c_override is not None:
+        c_prior = c_override
+        c_src = f"--c 指定"
+    elif c_meas is not None:
+        c_prior = c_meas
+        c_src = "互谱实测"
+    else:
+        c_prior = C_THEORY
+        c_src = "深水理论（互谱测速失败，慎用）"
+    print(f"[c 先验] {c_prior:.0f} mm/s（{c_src}，固定不参与训练）")
     # 传播坐标系下各向异性 sigma（归一化坐标 v∈[-1,1]，全域周期数 ≈ 2σ，
     # sigma 位置与输入维 (ξ, ζ, t) 一一对应，见 FourierFeatures）：
-    #   σ_ξ=0.5：ξ 跨度 2422mm ≈ 0.97λ，全域约 1 个波动周期 → 2σ≈1；
+    #   σ_ξ=0.5：ξ 跨度 ~921mm ≈ 0.98λ(λ≈935mm)，全域约 1 个波动周期 → 2σ≈1；
     #   σ_ζ=0.3：ζ 向变化缓慢；
-    #   σ_t=8.0：t 跨度 19.98s × 0.79Hz ≈ 15.8 周期 → 2σ≈16，原值 1.0
+    #   σ_t=8.0：t 跨度 19.98s × 0.78Hz ≈ 15.6 周期 → 2σ≈16，原值 1.0
     #   欠覆盖时间谱 ~8×。B 可学习，初始化贴近目标谱即可（pinn_v2 教训一）。
     sigmas = (0.5, 0.3, 8.0) if rotated else (0.5, 0.5, 8.0)
-    model = PINNWaveV2(bounds, c_init=C_THEORY, learn_c=False, sigmas=sigmas)
+    model = PINNWaveV2(bounds, c_init=c_prior, learn_c=False, sigmas=sigmas)
     model = train_pinn(model, xyt, eta_t, bounds, epochs=2500,
                        lambda_phys=1.0, n_colloc=2048, log_every=500,
                        device=DEVICE)
@@ -315,7 +334,7 @@ def main():
     # 片段级留出：整段轨迹未参与训练与预处理拟合，是泛化技能而非插值技能
     print(f"\n[结果] 留出片段 R² = {r2:.3f}（整段留出 + 预处理仅 train 拟合；"
           f">0 才比均值基线强，>0.5 较好）")
-    print(f"[结果] c = {c_rec:.0f} mm/s（固定为理论值，反演不可靠见上注释）")
+    print(f"[结果] c = {c_rec:.0f} mm/s（固定值={c_src}，反演不可靠见上注释）")
 
     # 可视化：t=中值帧的预测波面 + 数据散点
     import matplotlib

@@ -96,11 +96,11 @@ def main():
     f_dom = fq[k_dom]
     amp_ts = 2 * sp[k_dom] / w_ts.sum()  # 窗增益修正：幅值 = 2|X|/Σw（Hann 即 4|X|/N）
     mid = len(ts) // 2
-    # 波长用 λ = c/f 换算，不再读空间 FFT：ξ 向孔径 ~2.4m < 1λ（~2.5m），
-    # 空间谱首峰（1/(N·dx) ≈ 2443mm）只是孔径窗伪影，曾误当波长 headline。
-    # c 取理论值 1976 mm/s（互谱实测 1975 mm/s 一致，见 diag_hovmoller_xcorr.py，
-    # 两者代入 λ 相差 < 2mm），f 取本场实测主频。
-    lam_cf = C_THEORY / f_dom
+    # 波长用 λ = c/f 换算，不再读空间 FFT：ξ 向孔径 < 1λ，
+    # 空间谱首峰（1/(N·dx)）只是孔径窗伪影，曾误当波长 headline。
+    # c 取 checkpoint 中 PINN 固定的 c（互谱实测值，见 run_real_pinn.py），
+    # f 取本场实测主频。
+    lam_cf = model.c.item() / f_dom
     sigx = eta_w[:, cy, mid] - eta_w[:, cy, mid].mean()
     spx = np.abs(np.fft.rfft(sigx * np.hanning(len(sigx))))
     kx = np.fft.rfftfreq(len(sigx), xi[1] - xi[0])
@@ -108,8 +108,8 @@ def main():
     xi_span = b["x"][1] - b["x"][0]
     print(f"[参数] 波成分场：主频 {f_dom:.3f} Hz（理论 {F_WAVE_PAPER}）| "
           f"中心点振幅 {amp_ts:.1f} mm（理论 40）| "
-          f"波长 λ=c/f = {lam_cf:.0f} mm（c={C_THEORY:.0f} mm/s 理论值 × 实测主频；"
-          f"理论 2502）| "
+          f"波长 λ=c/f = {lam_cf:.0f} mm（c={model.c.item():.0f} mm/s 互谱实测 × "
+          f"实测主频；深水理论 2502 已被数据排除）| "
           f"原始场 rms {eta_g.std():.1f} mm（含慢变/边缘伪结构）| "
           f"波成分 rms {eta_w[cov].std():.1f} mm（覆盖区内）")
     print(f"[参数] 空间 FFT 主峰对应 {lam_fft:.0f} mm —— 仅定性参考：ξ 孔径 "

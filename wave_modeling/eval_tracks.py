@@ -160,8 +160,8 @@ def evaluate(pkl_path, label):
         cs = np.array([fit_cn([unwrapped[k] for k in
                                rng.integers(len(unwrapped), size=len(unwrapped))])[0]
                        for _ in range(200)])
-        print(f"[相] c = {c2:.0f} mm/s（理论 {C_THEORY:.0f}，偏差 "
-              f"{abs(c2 - C_THEORY) / C_THEORY:.1%}）| 残差 RMS "
+        print(f"[相] c = {c2:.0f} mm/s（深水理论参考 {C_THEORY:.0f}——正确几何下"
+              f"本数据已排除该值，偏差 {abs(c2 - C_THEORY) / C_THEORY:.1%}）| 残差 RMS "
               f"{np.sqrt(np.mean(res ** 2)) * 1000:.0f} ms | 95% CI "
               f"[{np.percentile(cs, 2.5):.0f}, {np.percentile(cs, 97.5):.0f}]")
     else:
