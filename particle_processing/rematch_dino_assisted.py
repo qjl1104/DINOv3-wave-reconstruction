@@ -1,5 +1,9 @@
 # particle_processing/rematch_dino_assisted.py
 """
+【已归档】本脚本是 aug24 对照侧链（repro 链），非生产链——生产链为
+rematch_dino_v2.py（canonical 输入）。其描述子输入 DINOv3/desc_aug24_*.pkl
+是历史预存产物，本分支上没有对应的再生成脚本，丢失后无法在本分支重建。
+
 DINOv3 辅助跨相机轨迹匹配：在 rematch_rectified 的几何判据（dy≈0、视差近恒定）
 之上，加"轨迹级描述子相似度"作为消歧打分/门槛。
 
@@ -24,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import rematch_rectified as rr  # noqa: E402
+import rematch_dino_common as dc  # noqa: E402
 import __main__  # noqa: E402
 
 for _n in ["Track", "UltraTrack", "WaveParticleTrack", "StrictTrack",
@@ -49,8 +54,6 @@ CALIB = os.path.join(ROOT, "camera_calibration/params/stereo_calib_params_from_m
 OUT_PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_repro_dino.pkl")
 
 MAX_NN_DIST = 3.0      # 轨迹点 → 检测点归属上限 px
-DINO_GATE = 0.55       # 描述子相似度门槛（真匹配 vs 错配分界，按分布调）
-RELAX_DISP_STD = 60.0  # DINO 高时放宽的视差波动门（原 30）
 
 
 def load_det_desc(det_pkl, desc_pkl):
@@ -79,18 +82,6 @@ def track_descriptors(track, det_desc):
     return res
 
 
-def pair_dino_sim(dl, dr, common):
-    """候选对共同帧上的描述子余弦相似度均值（两端都有描述子的帧）。"""
-    sims = []
-    for f in common:
-        if f in dl and f in dr:
-            a, b = dl[f], dr[f]
-            na, nb = np.linalg.norm(a), np.linalg.norm(b)
-            if na > 1e-6 and nb > 1e-6:
-                sims.append(float(a @ b / (na * nb)))
-    return (float(np.mean(sims)) if sims else -1.0), len(sims)
-
-
 def main():
     import cv2
     raw_left = pickle.load(open(TRAJ_L, "rb"))
@@ -99,9 +90,10 @@ def main():
     KL, DL = calib["K_left"], calib["D_left"].ravel()
     KR, DR = calib["K_right"], calib["D_right"].ravel()
     R1, R2, P1, P2 = calib["R1"], calib["R2"], calib["P1"], calib["P2"]
-    # rematch_rectified.triangulate_pairs 引用其模块级 KL/DL/KR/DR
+    # rematch_rectified.triangulate_pairs 引用其模块级 KL/DL/KR/DR 与 R1/R2
     # （原本在 __main__ 块赋值，import 时不存在）——在此补齐
     rr.KL, rr.DL, rr.KR, rr.DR = KL, DL, KR, DR
+    rr.R1, rr.R2 = R1, R2
     raw_left = [t for t in raw_left if len(t.points) >= rr.MIN_TRAJ_LEN]
     raw_right = [t for t in raw_right if len(t.points) >= rr.MIN_TRAJ_LEN]
     print(f"参与匹配：左 {len(raw_left)} 条，右 {len(raw_right)} 条")
@@ -118,62 +110,24 @@ def main():
     td_r = [track_descriptors(t, det_desc_r) for t in raw_right]
 
     # 给所有几何候选对打 DINO 分；同时构造"放宽视差波动门"的扩展候选
-    rows = []
-    for i, j, st in candidates:
-        n_common, med_dy, med_disp, std_disp = st
-        fl, _ = rect_left[i]
-        fr, _ = rect_right[j]
-        common = sorted(set(fl) & set(fr))
-        sim, nsim = pair_dino_sim(td_l[i], td_r[j], common)
-        rows.append(dict(i=i, j=j, st=st, sim=sim, nsim=nsim))
-    sims = np.array([r["sim"] for r in rows if r["nsim"] >= 10])
+    rows = dc.score_candidates(candidates, rect_left, rect_right, td_l, td_r)
+    sims = np.array([r["sim"] for r in rows if r["nsim"] >= dc.MIN_NSIM])
     if len(sims):
         print(f"[DINO] 候选对相似度分布：med {np.median(sims):.3f} "
               f"p25 {np.percentile(sims, 25):.3f} p75 {np.percentile(sims, 75):.3f}")
 
-    # 扩展候选：dy 与视差范围满足、视差波动放宽到 RELAX_DISP_STD 的未入候选对
-    # （从 match_pairs 的 stats_grid 拿不到被 std 门拒的对，这里直接重算）
-    ext = []
-    for i, t_l in enumerate(raw_left):
-        fl, pl = rect_left[i]
-        fset_l = set(fl)
-        for j, t_r in enumerate(raw_right):
-            fr, pr = rect_right[j]
-            common = sorted(fset_l & set(fr))
-            if len(common) < rr.MIN_OVERLAP:
-                continue
-            il = [fl.index(f) for f in common]
-            ir = [fr.index(f) for f in common]
-            dy = pl[il, 1] - pr[ir, 1]
-            disp = pl[il, 0] - pr[ir, 0]
-            med_dy, med_disp, std_disp = np.median(np.abs(dy)), np.median(disp), disp.std()
-            if med_dy > rr.MAX_MED_DY:
-                continue
-            if not (rr.DISP_RANGE[0] <= med_disp <= rr.DISP_RANGE[1]):
-                continue
-            if std_disp <= rr.MAX_DISP_STD:
-                continue  # 已在几何候选里
-            if std_disp > RELAX_DISP_STD:
-                continue
-            sim, nsim = pair_dino_sim(td_l[i], td_r[j], common)
-            ext.append(dict(i=i, j=j, st=(len(common), med_dy, med_disp, std_disp),
-                            sim=sim, nsim=nsim))
-    print(f"[放宽] 视差波动 {rr.MAX_DISP_STD:.0f}–{RELAX_DISP_STD:.0f}px 的扩展候选 {len(ext)} 对")
+    ext = dc.extended_candidates(rect_left, rect_right, td_l, td_r)
+    print(f"[放宽] 视差波动 {rr.MAX_DISP_STD:.0f}–{dc.RELAX_DISP_STD:.0f}px 的扩展候选 {len(ext)} 对")
 
     # 最终接受：几何候选中 DINO ≥ 门 + 扩展候选中 DINO ≥ 门
-    acc = [r for r in rows if r["nsim"] >= 10 and r["sim"] >= DINO_GATE]
-    acc_ext = [r for r in ext if r["nsim"] >= 10 and r["sim"] >= DINO_GATE]
-    print(f"[接受] 几何候选×DINO≥{DINO_GATE}: {len(acc)} 对；扩展×DINO: {len(acc_ext)} 对")
+    acc, _ = dc.dino_accept(rows)
+    acc_ext, _ = dc.dino_accept(ext)
+    print(f"[接受] 几何候选×DINO≥{dc.DINO_GATE}: {len(acc)} 对；扩展×DINO: {len(acc_ext)} 对")
     pairs = [(r["i"], r["j"], r["st"]) for r in acc + acc_ext]
 
     trajs_3d = rr.triangulate_pairs(pairs, rect_left, rect_right,
                                     raw_left, raw_right, P1, P2)
-    kept = []
-    for tr in trajs_3d:
-        z_med = np.median(tr[:, 3])
-        extent = max(np.ptp(tr[:, 1]), np.ptp(tr[:, 2]))
-        if rr.DEPTH_RANGE[0] <= z_med <= rr.DEPTH_RANGE[1] and extent <= rr.MAX_EXTENT_UV:
-            kept.append(tr)
+    kept = dc.quality_filter(trajs_3d)
     print(f"三角化后质量过滤：{len(kept)}/{len(trajs_3d)} 条保留，"
           f"总点 {sum(len(t) for t in kept)}")
     with open(OUT_PKL, "wb") as f:

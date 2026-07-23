@@ -137,7 +137,10 @@ def match_pairs(rect_left, rect_right):
             cost[i, j] = med_dy + 0.05 * std_disp
             stats_grid[(i, j)] = (len(common), med_dy, med_disp, std_disp)
     # 用大数代替 inf 再做指派（inf 在"两行只有一个共同可行列"时会判 infeasible），
-    # 指派后按真实成本阈值过滤
+    # 指派后按真实成本阈值过滤。
+    # 注意：匈牙利 1-to-1 结果仅用于日志对照，不参与接受决策——
+    # 实际接受走下方 candidates（片段级，故意允许多对多：
+    # 同一粒子断成的多个片段对各自给出独立 3D 采样，重复点由下游按帧去重）。
     BIG = 1e4
     ok_r = np.isfinite(cost).any(axis=1)
     ok_c = np.isfinite(cost).any(axis=0)
@@ -157,9 +160,17 @@ def match_pairs(rect_left, rect_right):
 
 
 def triangulate_pairs(pairs, rect_left, rect_right, raw_left, raw_right, P1, P2):
-    """对匹配对按共同帧三角化（用原始未畸变点经 undistortPoints 归一化更准，
-    这里直接用 cv2.triangulatePoints + 畸变未校正点会引入误差，
-    因此先把原始点去畸变到归一化平面，再用 P1/P2 的归一化形式三角化）。"""
+    """对匹配对按共同帧三角化（标准 OpenCV 矫正双目三角化）：
+    1) undistortPoints 带 R1/R2 → 左右点成为"矫正坐标系"下的归一化光线；
+    2) 用矫正投影的归一化形式 P1r=[I|0]、P2r=[I|t'] 三角化
+       （t' 由矫正 P2 提取：P2=K'[I|t']，t'=inv(K')@P2[:,3]，≈(-B,0,0)）；
+    3) 三角化结果在矫正左目坐标系，左乘 R1.T 转回原左目坐标系输出。
+    （旧实现去畸变不带 R1/R2——光线留在原始相机系——却配矫正系的 P 阵，
+    两个坐标系差 ~8.5°，合成数据往返误差中位 ~26m，属坐标系混用。）
+    R1/R2 与 KL/DL/KR/DR 同为模块级全局（__main__ 块或调用方赋值）。"""
+    t_rect = np.linalg.inv(P2[:, :3]) @ P2[:, 3]
+    P1r = np.hstack([np.eye(3), np.zeros((3, 1))])
+    P2r = np.hstack([np.eye(3), t_rect.reshape(3, 1)])
     trajs_3d = []
     for iL, jR, _st in pairs:
         fl, _ = rect_left[iL]
@@ -167,13 +178,11 @@ def triangulate_pairs(pairs, rect_left, rect_right, raw_left, raw_right, P1, P2)
         common = sorted(set(fl) & set(fr))
         pl = np.array([raw_left[iL].points[f] for f in common], dtype=np.float64)
         pr = np.array([raw_right[jR].points[f] for f in common], dtype=np.float64)
-        pl_n = cv2.undistortPoints(pl.reshape(-1, 1, 2), KL, DL).reshape(-1, 2)
-        pr_n = cv2.undistortPoints(pr.reshape(-1, 1, 2), KR, DR).reshape(-1, 2)
-        # 归一化投影矩阵：Pn = [R|t]（P = K[R|t]）
-        P1n = np.linalg.inv(KL) @ P1
-        P2n = np.linalg.inv(KR) @ P2
-        pts4 = cv2.triangulatePoints(P1n, P2n, pl_n.T, pr_n.T)
+        pl_n = cv2.undistortPoints(pl.reshape(-1, 1, 2), KL, DL, R=R1).reshape(-1, 2)
+        pr_n = cv2.undistortPoints(pr.reshape(-1, 1, 2), KR, DR, R=R2).reshape(-1, 2)
+        pts4 = cv2.triangulatePoints(P1r, P2r, pl_n.T, pr_n.T)
         xyz = (pts4[:3] / pts4[3]).T
+        xyz = xyz @ R1  # 行向量写法：X_cam1 = R1.T @ X_rect
         trajs_3d.append(np.c_[common, xyz])
     return trajs_3d
 

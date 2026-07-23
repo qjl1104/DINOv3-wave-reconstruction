@@ -10,6 +10,7 @@ import importlib.util
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)  # 路径锚定脚本所在目录，与 CWD 无关
 spec = importlib.util.spec_from_file_location(
     "det02", os.path.join(HERE, "02_particle_detection.py"))
 m = importlib.util.module_from_spec(spec)
@@ -24,7 +25,8 @@ params = {
 }
 
 m.run_detection(
-    "../data/preprocessed_92/left/", "../data/preprocessed_92/right/",
-    "../data/detections/detections_92_left.pkl",
-    "../data/detections/detections_92_right.pkl",
+    os.path.join(ROOT, "data/preprocessed_92/left/"),
+    os.path.join(ROOT, "data/preprocessed_92/right/"),
+    os.path.join(ROOT, "data/detections/detections_92_left.pkl"),
+    os.path.join(ROOT, "data/detections/detections_92_right.pkl"),
     params, params)
