@@ -1,5 +1,9 @@
 # DINOv3/match_dino_tracks.py
 """
+【已归档 ARCHIVED】尽管名字带 dino，本脚本的匹配判据不含任何 DINO 相似度
+（纯 dy/视差几何 + 匈牙利全局指派）；产出 trajectories_3d_dino.pkl 在生产链中
+无下游消费者，仅作实验记录保留。
+
 实验A 第二步：DINOv3 描述子轨迹的跨相机匹配 + 三角化。
 
 与 rematch_rectified.py 同原理（矫正坐标下 dy≈0 + 视差近恒定 + 匈牙利/
@@ -27,7 +31,7 @@ from utils import reproject_to_3d  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 MIN_OVERLAP = 20
 MAX_MED_DY = 3.0
-DISP_RANGE = (150, 1200)   # paper_params 坐标系：bf≈2.84e6，Z 2.4–15m → disp 190–1180
+DISP_RANGE = (150, 1200)   # paper_params 坐标系：bf = 3.7187e6，disp 190–1180 ↔ Z ≈ 3.15–19.6 m
 MAX_DISP_STD = 40.0
 MIN_TRAJ_LEN = 20
 DEPTH_RANGE = (2500, 12000)

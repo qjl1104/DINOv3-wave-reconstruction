@@ -34,9 +34,13 @@ from config import Config  # noqa: E402
 from models import CorrMatchingStereoModel  # noqa: E402
 from utils import load_model_checkpoint, reproject_to_3d  # noqa: E402
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 CKPT = "training_runs/20260713-160907/checkpoints/best_model.pth"
 OUT_PKL = "pointclouds_1000f_refined.pkl"
 OUT_STATS = "refine_stats.npz"
+
+
+# checkpoint 键核对由 utils.load_model_checkpoint 统一报告（缺失/多余键 + proj/geo_fusion 警告）
 
 SNAP_R = 8.0      # snap 搜索半径 px（半 patch）
 DY_MAX = 3.0      # 极线 |dy| 上限 px
@@ -85,8 +89,13 @@ def main():
     load_model_checkpoint(model, CKPT, device)
     model.eval()
 
-    files = sorted(glob.glob("feature_cache/left*.pt"),
+    # 锚定脚本目录：CWD 不对时 glob 会落空，空结果会把共享输出 pkl 覆盖成空
+    files = sorted(glob.glob(os.path.join(HERE, "feature_cache/left*.pt")),
                    key=lambda p: int(re.search(r"(\d+)", os.path.basename(p)).group(1)))
+    if not files:
+        print(f"[错误] 未找到 {os.path.join(HERE, 'feature_cache/left*.pt')}，"
+              "请先运行 precompute_cache.py 生成特征缓存")
+        sys.exit(1)
     print(f"缓存帧数: {len(files)}")
 
     clouds = {}

@@ -34,6 +34,7 @@ from config import Config  # noqa: E402
 from refine_subpixel import ncc_1d  # noqa: E402
 from utils import reproject_to_3d  # noqa: E402
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_PKL = "pointclouds_dnn.pkl"
 PATCH = 16          # DINOv3 ViT-B/16 特征步长
 DY_MAX = 3.0        # 极线 |dy| 上限 px
@@ -45,8 +46,11 @@ MIN_DISP = 10.0
 def sample_desc(feat, kps):
     """feat: [C, Hf, Wf] fp16；kps: [N,2] 像素坐标 → 双线性采样描述子 [N, C]。"""
     C, Hf, Wf = feat.shape
-    gx = (kps[:, 0] / PATCH).clamp(0, Wf - 1.001)
-    gy = (kps[:, 1] / PATCH).clamp(0, Hf - 1.001)
+    # 中心对齐映射：token j 覆盖像素 [16j, 16j+16)、中心 16j+8 → x/16-0.5，
+    # 使 patch 中心的关键点恰好落在其 token 上（公式全仓库唯此一份，
+    # compute_desc*.py / track_descriptor.py 均 import 本函数）
+    gx = (kps[:, 0] / PATCH - 0.5).clamp(0, Wf - 1.001)
+    gy = (kps[:, 1] / PATCH - 0.5).clamp(0, Hf - 1.001)
     x0, y0 = gx.floor().long(), gy.floor().long()
     x1, y1 = (x0 + 1).clamp(max=Wf - 1), (y0 + 1).clamp(max=Hf - 1)
     fx, fy = (gx - x0.float()).float(), (gy - y0.float()).float()
@@ -59,8 +63,13 @@ def sample_desc(feat, kps):
 def main():
     cfg = Config()
     Q = np.load(cfg.CALIBRATION_FILE)["Q"]
-    files = sorted(glob.glob("feature_cache/left*.pt"),
+    # 锚定脚本目录：CWD 不对时 glob 会落空，空结果会把共享输出 pkl 覆盖成空
+    files = sorted(glob.glob(os.path.join(HERE, "feature_cache/left*.pt")),
                    key=lambda p: int(re.search(r"(\d+)", os.path.basename(p)).group(1)))
+    if not files:
+        print(f"[错误] 未找到 {os.path.join(HERE, 'feature_cache/left*.pt')}，"
+              "请先运行 precompute_cache.py 生成特征缓存")
+        sys.exit(1)
     print(f"缓存帧数: {len(files)}")
 
     clouds = {}
@@ -71,6 +80,14 @@ def main():
         d = torch.load(fp, map_location="cpu", weights_only=False)
         kpl = d["keypoints_left"].float()
         kpr = d["keypoints_right"].float()
+        if len(kpr) < 2:
+            # 右点 <2 时 sim.topk(2) 直接 RuntimeError，跳过本帧
+            print(f"[跳过] 帧 {fi}: 右关键点仅 {len(kpr)} 个，无法 topk(2)/ratio")
+            clouds[fi] = np.zeros((0, 3))
+            n_l.append(len(kpl))
+            n_cand.append(0)
+            n_pass.append(0)
+            continue
         dl = sample_desc(d["feat_left"], kpl)    # [Nl, C]
         dr = sample_desc(d["feat_right"], kpr)   # [Nr, C]
         sim = dl @ dr.T                          # [Nl, Nr]
@@ -86,6 +103,8 @@ def main():
         best_l = sim.argmax(dim=0)
         mutual = best_l[best_r] == torch.arange(len(kpl))
 
+        # 注：极线掩码后若只剩 1 个候选，sim2=-1 被 clamp 成 1e-6，ratio 检验
+        # 形同虚设——此时靠 SIM_MIN 与互查兜底（仅备注，不改逻辑）
         ok = mutual & (sim1 > SIM_MIN) & (sim1 > RATIO * sim2.clamp(min=1e-6))
         idx = ok.nonzero(as_tuple=True)[0]
 

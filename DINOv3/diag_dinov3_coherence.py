@@ -195,7 +195,6 @@ def main():
         ax[2].legend(); ax[2].set_title(f"peak-freq dist ({frac_079:.0%} at 0.79)")
     # Hovmöller along propagation: 节点按投影位置分箱
     projs = (pos @ n2)
-    order = np.argsort(projs)
     pbins = np.linspace(projs.min(), projs.max(), 14)
     H = np.full((len(pbins) - 1, len(frames)), np.nan)
     fidx = {f: k for k, f in enumerate(frames)}

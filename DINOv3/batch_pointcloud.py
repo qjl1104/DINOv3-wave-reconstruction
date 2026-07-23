@@ -29,6 +29,7 @@ from config import Config  # noqa: E402
 from models import CorrMatchingStereoModel  # noqa: E402
 from utils import load_model_checkpoint, reproject_to_3d  # noqa: E402
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 CKPT = "training_runs/20260713-160907/checkpoints/best_model.pth"
 OUT_PKL = "pointclouds_1000f.pkl"
 
@@ -48,8 +49,13 @@ def main():
     load_model_checkpoint(model, CKPT, device)
     model.eval()
 
-    files = sorted(glob.glob("feature_cache/left*.pt"),
+    # 锚定脚本目录：CWD 不对时 glob 会落空，空结果会把共享输出 pkl 覆盖成空
+    files = sorted(glob.glob(os.path.join(HERE, "feature_cache/left*.pt")),
                    key=lambda p: int(re.search(r"(\d+)", os.path.basename(p)).group(1)))
+    if not files:
+        print(f"[错误] 未找到 {os.path.join(HERE, 'feature_cache/left*.pt')}，"
+              "请先运行 precompute_cache.py 生成特征缓存")
+        sys.exit(1)
     print(f"缓存帧数: {len(files)}")
 
     clouds = {}
@@ -61,7 +67,11 @@ def main():
         rg = d["right_gray"].float().unsqueeze(0).unsqueeze(0).to(device) / 255.0
         lrgb = lg.repeat(1, 3, 1, 1)
         rrgb = rg.repeat(1, 3, 1, 1)
-        mask = torch.ones(1, 1, lg.shape[-2], lg.shape[-1], device=device)
+        # 优先用缓存掩码（与 refine_subpixel.py 一致）；旧缓存无 mask 键时退回全 1
+        if "mask" in d:
+            mask = (d["mask"].float().unsqueeze(0).unsqueeze(0) / 255.0).to(device)
+        else:
+            mask = torch.ones(1, 1, lg.shape[-2], lg.shape[-1], device=device)
         cached = {"feat_left": d["feat_left"].unsqueeze(0).to(device),
                   "feat_right": d["feat_right"].unsqueeze(0).to(device),
                   "keypoints_left": d["keypoints_left"].unsqueeze(0).to(device),

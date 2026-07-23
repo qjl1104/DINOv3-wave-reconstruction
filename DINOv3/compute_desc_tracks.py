@@ -25,10 +25,6 @@ ROOT = os.path.dirname(HERE)
 PATCH = 16
 
 
-class _TrackStub:
-    pass
-
-
 def main():
     side = sys.argv[1]
     img_dir = os.path.join(ROOT, "data", f"{side}_images")
@@ -46,6 +42,10 @@ def main():
                "UltraOptimizedKalmanFilter", "WaveParticleKalmanFilter",
                "StrictWaveKalmanFilter"]:
         setattr(__main__, _n, getattr(rr, _n))
+    # rematch_rectified 无 RobustKalmanFilter（pkl 里它是 __main__ 下的
+    # SimpleKalmanFilter 子类），与 rematch_dino_v2.py 同样方式打桩
+    __main__.RobustKalmanFilter = type(
+        "RobustKalmanFilter", (rr.SimpleKalmanFilter,), {})
     tracks = pickle.load(open(traj_pkl, "rb"))
     print(f"轨迹 {len(tracks)} 条")
 

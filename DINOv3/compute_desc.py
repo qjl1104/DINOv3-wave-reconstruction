@@ -1,6 +1,6 @@
-# DINOv3/compute_desc_92.py
+# DINOv3/compute_desc.py
 """
-DINOv3 检测分类器 第1步：在 preprocessed_92 图像上计算检测点描述子。
+DINOv3 检测分类器 第1步：在指定图像目录上计算检测点描述子。
 输入约定与 precompute_cache.py 一致（灰度→3ch→/255→pad 到 patch 倍数，
 bf16，取 last_hidden_state 的 patch tokens）。
 只保存检测点处的双线性采样描述子（不存稠密特征图，省 ~48GB 磁盘）。
@@ -48,7 +48,12 @@ def main():
     t0 = __import__("time").time()
     for fi, (fp, dets) in enumerate(zip(files, detections)):
         img = cv2.imread(fp, 0)
-        if img is None or len(dets) == 0:
+        if img is None:
+            # 读取失败但检测存在：补 NaN 行（行数=该帧检测数），维持输出与
+            # 检测逐帧逐点对齐（原 (0,768) 空数组会让后续帧整体错位）
+            out.append(np.full((len(dets), 768), np.nan, dtype=np.float16))
+            continue
+        if len(dets) == 0:
             out.append(np.zeros((0, 768), dtype=np.float16))
             continue
         rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
