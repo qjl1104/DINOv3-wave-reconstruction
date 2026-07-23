@@ -5,7 +5,8 @@
 - final_result.png：数据 vs 重建波面（中值时刻）、稠密 Hovmöller(ξ,t)
   叠加数据点、时间均方根振幅图、代表点时间序列对比
 - final_field.npz：稠密时空波面场 η(ξ,ζ,t)（论文用图/后续分析）
-- 打印重建场提取的波浪参数（主频、波长、振幅）与理论值对比
+- 打印重建场提取的波浪参数（主频、振幅；波长由 λ=c/f 换算，
+  空间 FFT 因孔径 < 1λ 仅作定性参考）与理论值对比
 
 用法：.venv_fs/Scripts/python.exe wave_modeling/final_visualize.py [traj_pkl]
 """
@@ -69,6 +70,9 @@ def main():
     # ---- 波成分提取：PINN 在数据稀疏/边缘区会生成慢变结构（~0.1Hz，
     # 全场 rms 可达 100mm），而数据本身 std 仅 40mm。波信号在 0.79Hz，
     # 对每个网格点的时间序列做 [0.6,1.0]Hz 带通，得到真实波成分场。
+    # 注意：同款带通同源复制于 diag_hovmoller_xcorr._frag_series 与
+    # run_real_pinn.measure_direction / eval_tracks（均用 [0.5,1.2]Hz，
+    # 本处刻意收窄以压掉 PINN 边缘伪结构）——改动任一处请对照其余几处。
     dt = ts[1] - ts[0]
     E = np.fft.rfft(eta_g - eta_g.mean(axis=2, keepdims=True), axis=2)
     fq_g = np.fft.rfftfreq(len(ts), dt)
@@ -85,19 +89,31 @@ def main():
     # ---- 从波成分场提取波浪参数 ----
     cx, cy = len(xi) // 2, len(zeta) // 2
     sig = eta_w[cx, cy]
-    sp = np.abs(np.fft.rfft(sig * np.hanning(len(sig))))
+    w_ts = np.hanning(len(sig))
+    sp = np.abs(np.fft.rfft(sig * w_ts))
     fq = np.fft.rfftfreq(len(sig), dt)
-    f_dom = fq[np.argmax(sp[1:]) + 1]
-    amp_ts = 2 * sp[np.argmax(sp[1:]) + 1] / len(sig)
+    k_dom = np.argmax(sp[1:]) + 1
+    f_dom = fq[k_dom]
+    amp_ts = 2 * sp[k_dom] / w_ts.sum()  # 窗增益修正：幅值 = 2|X|/Σw（Hann 即 4|X|/N）
     mid = len(ts) // 2
+    # 波长用 λ = c/f 换算，不再读空间 FFT：ξ 向孔径 ~2.4m < 1λ（~2.5m），
+    # 空间谱首峰（1/(N·dx) ≈ 2443mm）只是孔径窗伪影，曾误当波长 headline。
+    # c 取理论值 1976 mm/s（互谱实测 1975 mm/s 一致，见 diag_hovmoller_xcorr.py，
+    # 两者代入 λ 相差 < 2mm），f 取本场实测主频。
+    lam_cf = C_THEORY / f_dom
     sigx = eta_w[:, cy, mid] - eta_w[:, cy, mid].mean()
     spx = np.abs(np.fft.rfft(sigx * np.hanning(len(sigx))))
     kx = np.fft.rfftfreq(len(sigx), xi[1] - xi[0])
-    lam = 1.0 / kx[np.argmax(spx[1:]) + 1]
+    lam_fft = 1.0 / kx[np.argmax(spx[1:]) + 1]
+    xi_span = b["x"][1] - b["x"][0]
     print(f"[参数] 波成分场：主频 {f_dom:.3f} Hz（理论 {F_WAVE_PAPER}）| "
-          f"中心点振幅 {amp_ts:.1f} mm（理论 40）| 波长 {lam:.0f} mm（理论 2502）| "
+          f"中心点振幅 {amp_ts:.1f} mm（理论 40）| "
+          f"波长 λ=c/f = {lam_cf:.0f} mm（c={C_THEORY:.0f} mm/s 理论值 × 实测主频；"
+          f"理论 2502）| "
           f"原始场 rms {eta_g.std():.1f} mm（含慢变/边缘伪结构）| "
           f"波成分 rms {eta_w[cov].std():.1f} mm（覆盖区内）")
+    print(f"[参数] 空间 FFT 主峰对应 {lam_fft:.0f} mm —— 仅定性参考：ξ 孔径 "
+          f"{xi_span:.0f} mm < 1λ，空间谱无法分辨波长（首峰 = 孔径窗伪影）")
 
     # ---- 图 ----
     fig, ax = plt.subplots(2, 3, figsize=(19, 9))

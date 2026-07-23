@@ -91,6 +91,10 @@ def diag_hovmoller(series, allpts):
         import torch
         from pinn_v2 import PINNWaveV2
         ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        # 模型在传播坐标系 (ξ,ζ) 上训练：物理 (u,v) 查询点须先右乘 rot.T
+        # （与 final_visualize.py / verify_results.py 同一约定）；
+        # 旧 checkpoint 无 rot 键（方向先验引入前训练）时退化为单位阵。
+        rot = ck.get("rot", np.eye(2))
         model = PINNWaveV2(ck["bounds"], c_init=C_THEORY)
         model.load_state_dict(ck["model"])
         model.eval()
@@ -98,14 +102,18 @@ def diag_hovmoller(series, allpts):
         vc = 0.5 * (vb_c[:-1] + vb_c[1:])
         tc = 0.5 * (tb_c[:-1] + tb_c[1:])
         with torch.no_grad():
-            gu = torch.tensor(np.c_[np.repeat(uc, len(tc)),
-                                    np.full(uc.size * len(tc), v_med),
-                                    np.tile(tc, len(uc))], dtype=torch.float32)
-            Pu = model.predict(gu).numpy().reshape(len(uc), len(tc))
-            gv = torch.tensor(np.c_[np.full(vc.size * len(tc), u_med),
-                                    np.repeat(vc, len(tc)),
-                                    np.tile(tc, len(vc))], dtype=torch.float32)
-            Pv = model.predict(gv).numpy().reshape(len(vc), len(tc))
+            qu = np.c_[np.repeat(uc, len(tc)),
+                       np.full(uc.size * len(tc), v_med),
+                       np.tile(tc, len(uc))]
+            qu[:, :2] = qu[:, :2] @ rot.T   # (u,v) → (ξ,ζ)
+            Pu = model.predict(torch.tensor(qu, dtype=torch.float32)
+                               ).numpy().reshape(len(uc), len(tc))
+            qv = np.c_[np.full(vc.size * len(tc), u_med),
+                       np.repeat(vc, len(tc)),
+                       np.tile(tc, len(vc))]
+            qv[:, :2] = qv[:, :2] @ rot.T   # (u,v) → (ξ,ζ)
+            Pv = model.predict(torch.tensor(qv, dtype=torch.float32)
+                               ).numpy().reshape(len(vc), len(tc))
         # 数据面板与预测面板在有效格上的相关（检验 PINN 是否复现数据结构）
         m = ~np.isnan(Hu)
         if m.sum() > 10:
@@ -147,10 +155,29 @@ def diag_hovmoller(series, allpts):
 
 
 # ---------------------------------------------------------------- B. 互相关测 c
+def _regrid_uniform(fr, et, max_interp_gap=4):
+    """把片段按真实帧号重采样到均匀帧时间基（缺帧不能被 FFT 当作均匀采样，
+    否则频率最多偏 ~6%）：≤max_interp_gap 帧的短空洞（≤0.08s ≈ 1/10 周期）
+    线性插值；更长的空洞零填充——序列已 debias/带通居中，0 ≈ 均值电平，
+    且窄带单频信号在零填充下相位近似无偏，而线性插值会在 >1/4 周期的
+    空洞上注入错误相位（实测最长空洞 24 帧 = 0.48s ≈ 0.37 周期）。
+    无空洞时恒等。要求 fr 已排序去重。"""
+    grid = np.arange(fr[0], fr[-1] + 1)
+    if len(grid) == len(fr):
+        return fr, et
+    out = np.interp(grid, fr, et)
+    long = np.flatnonzero(np.diff(fr) - 1 > max_interp_gap)
+    for i in long:                       # 长空洞段改回 0（均值电平）
+        out[fr[i] + 1 - fr[0]: fr[i + 1] - fr[0]] = 0.0
+    return grid, out
+
+
 def _frag_series(series):
     """每条片段 → (帧号数组, η 数组, (u_med, v_med))，帧号整数。
     ≥64 帧的片段做 [0.5,1.2] Hz 带通（压制残余偏差趋势与高频噪声，
-    突出 0.79 Hz 波峰的相位信息）；更短的片段频率分辨率不足，保持原样。"""
+    突出 0.79 Hz 波峰的相位信息）；更短的片段频率分辨率不足，保持原样。
+    注意：同款带通同源复制于 run_real_pinn.measure_direction（[0.5,1.2]），
+    final_visualize.py 波成分提取用 [0.6,1.0]——改动任一处请对照其余两处。"""
     out = []
     for s in series:
         if len(s) < 30:
@@ -160,6 +187,7 @@ def _frag_series(series):
         fr, et = fr[order], s[order, 2]
         _, uniq = np.unique(fr, return_index=True)
         fr, et = fr[uniq], et[uniq]
+        fr, et = _regrid_uniform(fr, et)   # 缺帧 → 均匀帧时间基
         if len(fr) >= 64:
             E = np.fft.rfft(et - et.mean())
             fq = np.fft.rfftfreq(len(et), 1 / FPS)
@@ -169,21 +197,23 @@ def _frag_series(series):
     return out
 
 
-def _phase_pair(fr_i, et_i, fr_j, et_j):
-    """重叠窗口内 f0=0.79 Hz 互谱相位差 → 时滞 τ = Δφ/ω0（主值，mod T）。
+def _phase_pair(fr_i, et_i, fr_j, et_j, f0=F_WAVE):
+    """重叠窗口内 f0 处互谱相位差 → 时滞 τ = Δφ/(2π·f0)（主值，mod 1/f0）。
+    f0 默认论文值 0.79 Hz；调用方应传实测主峰中位（零填充精细测频，
+    本数据 ≈0.781 Hz）——写死 0.79 会引入 ~1% 的 c 系统偏差。
     两序列取同一重叠窗口、同一 nfft（零填充 4096，df≈0.012 Hz），
     相位差即互谱 arg(A·conj(B))，等效于用全部重叠样本的最优相位估计，
     不受余弦平台期 argmax 跳变影响。
     返回 (tau[s], amp_min[mm], n_window) 或 None。"""
-    f0 = max(fr_i[0], fr_j[0])
-    f1 = min(fr_i[-1], fr_j[-1])
-    n = int(f1 - f0 + 1)
+    w0 = max(fr_i[0], fr_j[0])
+    w1 = min(fr_i[-1], fr_j[-1])
+    n = int(w1 - w0 + 1)
     if n < int(MIN_OVERLAP_S * FPS):
         return None
     a = np.zeros(n)
     b = np.zeros(n)
-    ai = fr_i - f0
-    bj = fr_j - f0
+    ai = fr_i - w0
+    bj = fr_j - w0
     va = (ai >= 0) & (ai < n)
     vb = (bj >= 0) & (bj < n)
     a[ai[va]] = et_i[va]
@@ -193,12 +223,12 @@ def _phase_pair(fr_i, et_i, fr_j, et_j):
     nfft = 4096
     A = np.fft.rfft(a, nfft)
     B = np.fft.rfft(b, nfft)
-    k = int(round(F_WAVE * nfft / FPS))
+    k = int(round(f0 * nfft / FPS))
     amp_a = 2 * abs(A[k]) / n
     amp_b = 2 * abs(B[k]) / n
-    if amp_a < 4.0 or amp_b < 4.0:   # 两条片段在 0.79Hz 都真得有波才行
+    if amp_a < 4.0 or amp_b < 4.0:   # 两条片段在 f0 都真得有波才行
         return None
-    tau = np.angle(A[k] * np.conj(B[k])) / (2 * np.pi * F_WAVE)
+    tau = np.angle(A[k] * np.conj(B[k])) / (2 * np.pi * f0)
     return tau, min(amp_a, amp_b), n
 
 
@@ -223,21 +253,30 @@ def diag_xcorr(series):
     frags = _frag_series(series)
     print(f"[xcorr] 片段 {len(frags)} 条（≥30 帧）")
 
-    # 每条片段 FFT：确认 0.79 Hz 主峰普遍存在（只用 ≥100 帧的片段保证频率分辨率）
+    # 每条片段 FFT：确认 0.79 Hz 主峰普遍存在（只用 ≥100 帧的片段；
+    # 零填充 8192 精细定位峰频——短片段未零填充的 df 达 0.5Hz，
+    # 直接 argmax 测到的只是粗 bin 中心而非音调）
     pk_f, pk_a = [], []
     for fr, et, _ in frags:
         if len(fr) < 100:
             continue
         e = et - et.mean()
-        sp = np.abs(np.fft.rfft(e * np.hanning(len(e))))
-        fq = np.fft.rfftfreq(len(e), 1 / FPS)
+        w = np.hanning(len(e))
+        sp = np.abs(np.fft.rfft(e * w, 8192))
+        fq = np.fft.rfftfreq(8192, 1 / FPS)
         k = np.argmax(sp[1:]) + 1
         pk_f.append(fq[k])
-        pk_a.append(2 * sp[k] / len(e))
+        pk_a.append(2 * sp[k] / w.sum())  # 窗增益修正：幅值 = 2|X|/Σw（Hann 即 4|X|/N）
     pk_f, pk_a = np.array(pk_f), np.array(pk_a)
-    print(f"[xcorr] ≥100 帧片段 {len(pk_f)} 条 | FFT 主峰频率中位 "
-          f"{np.median(pk_f):.3f} Hz（IQR {np.percentile(pk_f, 25):.3f}–"
-          f"{np.percentile(pk_f, 75):.3f}）| 振幅中位 {np.median(pk_a):.1f} mm")
+    # τ = Δφ/(2π·f) 用实测主峰中位（本数据 ≈0.781Hz），写死论文值 0.79
+    # 会引入 ~1% 的 c 系统偏差；长片段不足时退回论文值 F_WAVE
+    f_meas = float(np.median(pk_f)) if len(pk_f) else F_WAVE
+    if len(pk_f):
+        print(f"[xcorr] ≥100 帧片段 {len(pk_f)} 条 | FFT 主峰频率中位 "
+              f"{f_meas:.3f} Hz（IQR {np.percentile(pk_f, 25):.3f}–"
+              f"{np.percentile(pk_f, 75):.3f}）| 振幅中位 {np.median(pk_a):.1f} mm")
+    else:
+        print(f"[xcorr] 无 ≥100 帧片段，τ 换算退回论文值 {F_WAVE} Hz")
 
     raw = []
     for i in range(len(frags)):
@@ -249,21 +288,27 @@ def diag_xcorr(series):
             sep = np.hypot(du, dv)
             if sep < MIN_SEP:
                 continue
-            out = _phase_pair(fr_i, et_i, fr_j, et_j)
+            out = _phase_pair(fr_i, et_i, fr_j, et_j, f0=f_meas)
             if out is None:
                 continue
             tau, amp_min, n_win = out
             w = amp_min * np.sqrt(n_win)
             raw.append((tau, du, dv, w, sep, amp_min))
-    print(f"[phase] 有效轨迹对 {len(raw)} 个（0.79Hz 幅值≥4mm, 间距≥{MIN_SEP:.0f}mm）")
+    print(f"[phase] 有效轨迹对 {len(raw)} 个（{f_meas:.3f}Hz 幅值≥4mm, "
+          f"间距≥{MIN_SEP:.0f}mm）")
     if len(raw) < 6:
         print("[xcorr] 有效对太少，无法拟合 c。")
         return
 
     # 第一遍：近距对（|τ|<T/2 无周期模糊）拟合初值
+    # （两遍去模糊拟合同源复制于 run_real_pinn.measure_direction 与
+    #  eval_tracks.evaluate，带通均 [0.5,1.2]Hz；final_visualize 用 [0.6,1.0]）
     near = [p for p in raw if p[4] < NEAR_SEP]
-    print(f"[phase] 近距对（<{NEAR_SEP:.0f}mm）{len(near)} 个 | "
-          f"时滞中位 {np.median([abs(p[0]) for p in near]):.3f} s")
+    if near:
+        print(f"[phase] 近距对（<{NEAR_SEP:.0f}mm）{len(near)} 个 | "
+              f"时滞中位 {np.median([abs(p[0]) for p in near]):.3f} s")
+    else:
+        print(f"[phase] 近距对（<{NEAR_SEP:.0f}mm）0 个，第一遍用全部对兜底")
     if len(near) >= 3:
         c1, n1, _ = fit_cn(near)
     else:  # 近距对不足时用全部对兜底

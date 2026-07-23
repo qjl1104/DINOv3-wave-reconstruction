@@ -24,6 +24,29 @@ F_WAVE = 0.79
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _regrid_uniform(t_sec, *ys, max_interp_gap=4):
+    """把同一时间基上的多条序列按真实帧号重采样到均匀帧网格（缺帧不能被
+    FFT 当作均匀采样，否则频率最多偏 ~6%）：≤max_interp_gap 帧的短空洞
+    （≤0.08s ≈ 1/10 周期）线性插值；更长的空洞零填充——序列已 debias/
+    带通居中，0 ≈ 均值电平，且窄带单频信号在零填充下相位近似无偏，而
+    线性插值会在 >1/4 周期的空洞上注入错误相位（实测最长空洞 24 帧
+    = 0.48s ≈ 0.37 周期）。无空洞时插值节点即原采样点，等价恒等。
+    返回 (t_uniform, *ys_uniform)。"""
+    fr = np.round(t_sec * FPS).astype(int)
+    order = np.argsort(fr)
+    fr = fr[order]
+    _, first = np.unique(fr, return_index=True)
+    fr = fr[first]
+    grid = np.arange(fr[0], fr[-1] + 1)
+    out = [np.interp(grid, fr, y[order][first]) for y in ys]
+    long = np.flatnonzero(np.diff(fr) - 1 > max_interp_gap)
+    for i in long:                       # 长空洞段改回 0（均值电平）
+        sl = slice(fr[i] + 1 - fr[0], fr[i + 1] - fr[0])
+        for o in out:
+            o[sl] = 0.0
+    return (grid / FPS,) + tuple(out)
+
+
 def main():
     import matplotlib
     matplotlib.use("Agg")
@@ -54,7 +77,14 @@ def main():
         s_rot = s.copy()
         s_rot[:, :2] = s_rot[:, :2] @ rot.T
         t_, eta_ = s_rot[:, 3], s_rot[:, 2]
-        eta_w = bandpass(eta_)
+        # PINN 先在相同（缺帧）采样点上预测，再与数据一起插回均匀帧时间基
+        q = torch.tensor(s_rot[:, [0, 1, 3]], dtype=torch.float32).to(DEVICE)
+        with torch.no_grad():
+            pred = model.predict(q).cpu().numpy().ravel()
+        # 帧号含缺帧：带通/FFT 前把数据与 PINN 序列重采样到均匀帧网格
+        t_u, eta_u, pred_u = _regrid_uniform(t_, eta_, pred)
+        eta_w = bandpass(eta_u)
+        pred_w = bandpass(pred_u)
         # 左：原始 η(t)（可见漂移 + 波动）
         ax = axes[row, 0]
         ax.plot(t_, eta_, ".-", ms=3, lw=0.8)
@@ -62,22 +92,19 @@ def main():
                      f"({t_.min():.1f}–{t_.max():.1f}s)")
         ax.set_xlabel("t (s)"); ax.set_ylabel("η (mm)")
         # 中：带通后 η(t) vs PINN（纯波成分重合度）
-        q = torch.tensor(s_rot[:, [0, 1, 3]], dtype=torch.float32).to(DEVICE)
-        with torch.no_grad():
-            pred = model.predict(q).cpu().numpy().ravel()
-        pred_w = bandpass(pred)
         ax = axes[row, 1]
-        ax.plot(t_, eta_w, ".", ms=3, label="data (bandpassed)")
-        ax.plot(t_, pred_w, "-", lw=1.2, label="PINN (bandpassed)", alpha=0.85)
+        ax.plot(t_u, eta_w, ".", ms=3, label="data (bandpassed)")
+        ax.plot(t_u, pred_w, "-", lw=1.2, label="PINN (bandpassed)", alpha=0.85)
         ss_res = np.sum((eta_w - pred_w) ** 2)
         ss_tot = np.sum((eta_w - eta_w.mean()) ** 2)
         ax.set_title(f"wave comp. (0.5-1.2Hz): R²={1 - ss_res / max(ss_tot, 1e-9):.2f}")
         ax.set_xlabel("t (s)")
         ax.legend(markerscale=2)
         # 右：FFT（原始 vs 带通）
-        e = eta_ - eta_.mean()
-        sp = np.abs(np.fft.rfft(e * np.hanning(len(e))))
-        spw = np.abs(np.fft.rfft(eta_w * np.hanning(len(eta_w))))
+        e = eta_u - eta_u.mean()
+        w = np.hanning(len(e))
+        sp = np.abs(np.fft.rfft(e * w))
+        spw = np.abs(np.fft.rfft(eta_w * w))
         fq = np.fft.rfftfreq(len(e), 1 / FPS)
         ax = axes[row, 2]
         ax.plot(fq, sp / sp.max(), color="gray", label="raw")
@@ -85,7 +112,7 @@ def main():
         ax.axvline(F_WAVE, color="g", ls="--")
         ax.set_xlim(0, 3)
         kw = np.argmax(spw[(fq > 0.4) & (fq < 3)]) + np.argmax(fq > 0.4)
-        amp = 2 * spw[kw] / len(e)
+        amp = 2 * spw[kw] / w.sum()   # 窗增益修正：幅值 = 2|X|/Σw（Hann 即 4|X|/N）
         ax.set_title(f"FFT: raw dom {fq[np.argmax(sp[1:]) + 1]:.2f}Hz → "
                      f"wave {fq[kw]:.2f}Hz, amp {amp:.1f}mm")
         ax.set_xlabel("f (Hz)")

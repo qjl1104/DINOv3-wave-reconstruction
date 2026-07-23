@@ -115,8 +115,11 @@ class PINNWaveV2(nn.Module):
         return torch.autograd.grad(y, x, grad_outputs=torch.ones_like(y),
                                    create_graph=True)[0]
 
-    def physics_residual(self, xyt, g=G_DEFAULT, h=0.05, mode="shallow"):
-        """xyt: [N,3] 物理单位、requires_grad=True。返回 PDE 残差 [N,1]。"""
+    def physics_residual(self, xyt, h=None, mode="shallow"):
+        """xyt: [N,3] 物理单位、requires_grad=True。返回 PDE 残差 [N,1]。
+        c 一律由 c_init/learn_c 直接给定（原 g 参数从未被使用，已移除）；
+        h 为水深，mode='boussinesq' 时【必填】，且单位须与 xyt 坐标一致
+        （真实管线为 mm，本文件合成自测为 m）。"""
         eta = self(xyt)
         g1 = self._grad(eta, xyt)
         eta_x, eta_y, eta_t = g1[:, 0:1], g1[:, 1:2], g1[:, 2:3]
@@ -128,6 +131,9 @@ class PINNWaveV2(nn.Module):
         lap = eta_xx + eta_yy
         res = eta_tt - self.c ** 2 * lap
         if mode == "boussinesq":
+            if h is None:
+                raise ValueError(
+                    "mode='boussinesq' 必须显式传水深 h（单位同 xyt 坐标）")
             # ∇²η_tt = ∂²(η_xx)/∂t² + ∂²(η_yy)/∂t²
             eta_xx_tt = self._grad(self._grad(eta_xx, xyt)[:, 2:3], xyt)[:, 2:3]
             eta_yy_tt = self._grad(self._grad(eta_yy, xyt)[:, 2:3], xyt)[:, 2:3]
@@ -170,32 +176,11 @@ def synthetic_wave_data(bounds, c_true, n_data=2000, amplitude=2e-3,
     return xyt, torch.tensor(eta, dtype=torch.float32).unsqueeze(1)
 
 
-def load_real_trajectories(pkl_file, fps, height_axis=2):
-    """加载 05_reconstruction_3d.py 输出的 trajectories_3d.pkl。
-    height_axis: 世界坐标中哪个轴是波面高度（相机俯视时常为 2，即 Z；
-    若标定时世界系 Y 朝上则取 1）。其余两轴为水平面坐标。
-    注意：05 的输出丢失了帧号，此处假设每条轨迹从第 0 帧开始且逐帧连续
-    （这是 05 输出的已知局限，更严谨的做法是让 05 同时保存帧号）。"""
-    import pickle
-    with open(pkl_file, "rb") as f:
-        trajs = pickle.load(f)
-    horiz = [i for i in range(3) if i != height_axis]
-    pts, times = [], []
-    for traj in trajs:
-        for i, p in enumerate(traj):
-            pts.append([p[horiz[0]], p[horiz[1]], p[height_axis]])
-            times.append(i / fps)
-    pts = np.asarray(pts, dtype=np.float32)
-    xyt = torch.tensor(np.stack([pts[:, 0], pts[:, 1], times], 1))
-    eta = torch.tensor(pts[:, 2:3])
-    return xyt, eta
-
-
 # ----------------------------------------------------------------------
 # 训练
 # ----------------------------------------------------------------------
 def train_pinn(model, data_xyt, data_eta, bounds, epochs=3000, lr=1e-3,
-               lambda_phys=1.0, n_colloc=2048, g=G_DEFAULT, h=0.05,
+               lambda_phys=1.0, n_colloc=2048, h=None,
                mode="shallow", warmup_frac=0.4, log_every=500,
                device="cpu", seed=0):
     """两个关键的损失平衡机制（见文件头"教训二/三"）：
@@ -203,7 +188,8 @@ def train_pinn(model, data_xyt, data_eta, bounds, epochs=3000, lr=1e-3,
       避免初始随机网络的巨大 PDE 残差把优化器引向 η≡0 平凡解。
     - 物理损失按【首个非零值自归一化】：二阶导数带 ω²≈100 放大，
       残差 MSE 天然比数据损失大 ~4 个数量级；除以 lp0 后
-      lambda_phys ∈ [0.1, 1] 都能兼顾场重建精度与 c 反演。"""
+      lambda_phys ∈ [0.1, 1] 都能兼顾场重建精度与 c 反演。
+    mode='boussinesq' 时 h（水深，单位同数据坐标）必填，见 physics_residual。"""
     torch.manual_seed(seed)
     model.to(device)
     data_xyt, data_eta = data_xyt.to(device), data_eta.to(device)
@@ -222,7 +208,7 @@ def train_pinn(model, data_xyt, data_eta, bounds, epochs=3000, lr=1e-3,
         lam = lambda_phys * min(1.0, epoch / warmup)
         if lam > 0:
             colloc = sample_collocation(bounds, n_colloc, device).requires_grad_(True)
-            loss_phys = torch.mean(model.physics_residual(colloc, g, h, mode) ** 2)
+            loss_phys = torch.mean(model.physics_residual(colloc, h=h, mode=mode) ** 2)
             if lp0 is None:
                 lp0 = loss_phys.detach().clamp_min(1e-12)
         else:
@@ -233,9 +219,10 @@ def train_pinn(model, data_xyt, data_eta, bounds, epochs=3000, lr=1e-3,
         opt.step()
 
         if epoch % log_every == 0 or epoch == 1:
+            # c 的单位随数据坐标（合成自测为 m/s，真实管线为 mm/s），不写死
             print(f"epoch {epoch:5d} | data {loss_data.item():.3e} | "
                   f"phys {loss_phys.item():.3e} | lam {lam:.1e} | "
-                  f"c = {model.c.item():.4f} m/s")
+                  f"c = {model.c.item():.4f} [坐标单位/s]")
     return model
 
 
@@ -292,6 +279,6 @@ if __name__ == "__main__":
 
     # boussinesq 模式冒烟测试（4 阶混合导数可走通且数值有限即可）
     xb = sample_collocation(bounds, 64, "cpu").requires_grad_(True)
-    rb = model.physics_residual(xb, G_DEFAULT, h_true, mode="boussinesq")
+    rb = model.physics_residual(xb, h=h_true, mode="boussinesq")
     assert torch.isfinite(rb).all(), "boussinesq 残差出现非有限值"
     print(f"[验证] boussinesq 残差冒烟测试通过，|res|_mean = {rb.abs().mean():.2e}")
