@@ -138,22 +138,55 @@ def stage5(calib):
     fig.colorbar(sc, ax=ax[0])
     ax[1].hist(pts[:, 2], bins=50)
     ax[1].set_title("Z 分布 mm")
-    # 某时刻波剖面：取 frame 500±2 的点，沿 PCA 面内传播向 ξ 画 η
-    sel = np.abs(fr_all - FRAME) <= 2
-    p = pts[sel]
-    if len(p) > 10:
-        c = pts.mean(0)
-        _, _, vt = np.linalg.svd(pts - c)
-        n = vt[2] * np.sign(vt[2][2])
-        u1, u2 = vt[0], vt[1]
-        xi = (p - c) @ u2 if abs(u2[1]) > abs(u1[1]) else (p - c) @ u1
-        eta = (p - c) @ n
-        ax[2].scatter(xi, eta, s=6)
-        ax[2].set_title(f"波剖面 frame{FRAME}±2（沿传播向 ξ vs η）")
-        ax[2].set_xlabel("ξ mm"); ax[2].set_ylabel("η mm")
+    # 某时刻波剖面：取覆盖最好的一帧，PCA 面内坐标 + 逐片段去偏 + 实测传播向 ξ
+    import torch
+    from collections import Counter
+    ck = torch.load(os.path.join(ROOT, "wave_modeling/real_run/pinn_real.pt"),
+                    map_location="cpu", weights_only=False)
+    cnt = Counter()
+    for t in trajs:
+        for fr in set(t[:, 0].astype(int)):
+            cnt[fr] += 1
+    frame_best = cnt.most_common(1)[0][0]
+    n2 = np.asarray(ck["rot"])[0]  # 实测传播方向（run_real_pinn 训练时存）
+    c3 = pts.mean(0)
+    _, _, vt = np.linalg.svd(pts - c3)
+    nvec = vt[2] * np.sign(vt[2][2])
+    xs, ys = [], []
+    for t in trajs:
+        sel = t[:, 0] == frame_best
+        if not sel.any():
+            continue
+        d = t[:, 1:4] - c3
+        eta_all = d @ nvec
+        uv = np.c_[d @ vt[0], d @ vt[1]]
+        xi_sel = (uv @ n2)[sel]
+        eta_sel = eta_all[sel] - np.median(eta_all)  # 逐片段去偏
+        xs += list(xi_sel); ys += list(eta_sel)
+    xs, ys = np.array(xs), np.array(ys)
+    if len(xs) > 10:
+        ax[2].scatter(xs, ys, s=18)
+        # 叠加该帧最小二乘拟合的正弦（λ 自由）
+        best = max(((1 - ((ys - (a1*np.sin(2*np.pi*xs/L + a2) + a3))**2).sum()
+                     / ((ys - ys.mean())**2).sum(), L, a1, a2, a3)
+                    for L in np.linspace(1500, 4000, 100)
+                    for (a1, a2, a3) in [np.linalg.lstsq(
+                        np.column_stack([np.sin(2*np.pi*xs/L),
+                                         np.cos(2*np.pi*xs/L), np.ones_like(xs)]),
+                        ys, rcond=None)[0]]),
+                   key=lambda z: z[0])
+        r2, L, a1, a2, a3 = best
+        import math
+        A_fit = math.hypot(a1, a2)
+        xx = np.linspace(xs.min(), xs.max(), 200)
+        ax[2].plot(xx, a1*np.sin(2*np.pi*xx/L + a2) + a3, "r--", lw=1.2,
+                   label=f"拟合 λ={L:.0f}mm A={A_fit:.0f}mm R^2={r2:.2f}")
+        ax[2].legend()
+    ax[2].set_title(f"波剖面 frame{frame_best}（单帧，逐片段去偏）")
+    ax[2].set_xlabel("ξ mm"); ax[2].set_ylabel("η mm")
     out = os.path.join(OUT, "stage5_pointcloud.png")
     fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
-    print(f"  stage5: {len(pts)} pts, snapshot {sel.sum()}")
+    print(f"  stage5: {len(pts)} pts, snapshot {len(xs)} @f{frame_best}")
 
 
 def main():
