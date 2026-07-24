@@ -125,6 +125,8 @@ def stage5(calib):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
     with open(os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl"), "rb") as f:
         trajs = pickle.load(f)
     pts = np.vstack([t[:, 1:4] for t in trajs if len(t) > 0])
