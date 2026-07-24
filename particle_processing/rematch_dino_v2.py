@@ -39,6 +39,8 @@ __main__.RobustKalmanFilter = RobustKalmanFilter
 
 CALIB = os.path.join(ROOT, "camera_calibration/params/stereo_calib_params_from_matlab_full.npz")
 OUT_PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl")
+# 视差平面先验开关在 rematch_rectified（rr.DISP_PLANE / rr.DISP_PLANE_TOL，默认开启，
+# 系数已交叉验证）：消长峰波沿波峰（≈极线）方向的匹配欠约束；重拟合用 fit_disp_plane.py。
 
 
 def main():

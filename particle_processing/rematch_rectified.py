@@ -4,13 +4,31 @@
 
 修正的三个问题：
 1. 旧 04 的"左右轨迹起止点像素距离 < 200px"预过滤在物理上错误——
-   该双目系统基线 1413mm，矫正后视差本身就有 400–1000px，
+   该双目系统基线 1413mm，矫正后视差本身就有 ~400px 量级，
    正确匹配全被该过滤误杀，只剩 19 对且多对错配（3D 深度 3–29m 发散）。
-   本脚本改为：先把 2D 点矫正到 rectified 坐标系（undistortPoints + R1/R2/P1/P2），
-   此时正确匹配必然满足 同行（dy≈0）、视差为正且大致恒定——用这两条做匹配。
+   本脚本改为：直接在矫正坐标系下匹配——正确匹配必然满足
+   同行（dy≈0）、视差为正且大致恒定——用这两条做匹配。
 2. 2D 轨迹本来就带绝对帧号（points dict 的 key），无需 DTW，
    直接按帧对齐逐点比较。
 3. 保留每个 3D 点的绝对帧号（旧 05 丢弃了），输出 [frame, x, y, z]。
+
+2026-07 坐标系修正（实证驱动）：
+- canonical 2D 轨迹 pkl（*_optimized.pkl）的点【已经在 npz 矫正图坐标系】
+  （实证：轨迹点 vs npz map 矫正图 blob 中位 1.74px、92%<3px；
+  vs 原始图 blob >34px 无重合）。故 rectify_traj 直通不再 undistortPoints，
+  triangulate_pairs 用矫正内参 K' 归一化、无畸变。
+- 长峰波上沿波峰（≈极线）方向的点对同相振荡：dy≈0 与视差恒定对【错误对】
+  同样成立，几何门在该方向欠约束；且错配在视差空间也聚成相干平面族
+  （宽窗候选 RANSAC 可见多个 ≥20 对 @3px 的假平面），必须用位置相关的
+  视差平面先验 DISP_PLANE 消歧。真家族经多重交叉验证确定为 d ≈ 565-781px
+  （Z ≈ 4.8-6.4m）：① 57 对 @3px 相干（残差中位 0.85px）；② 相速度
+  c = 2007mm/s、95%CI[1960,2063]（理论 1976，差 1.6%）；③ ≥300帧片段
+  100% 主峰 0.781Hz、振幅中位 37mm ≈ 波幅锚点；④ 原图标记物尺寸回归的
+  视差平面同构（x 斜率≈-0.01、y 斜率≈+0.36；30mm 标称直径反推需 ~22mm
+  有效可见直径，与半浸泡沫球一致）；⑤ 重投影误差中位 1.31px。
+  （早期"真视差 ~436px"基于垂直入射近似的单目相位反演 + 30mm 全可见
+  假设，经上述独立测量证伪；曾系统性接受的 ~871px 为串号错配族。）
+  平面系数重拟合用 fit_disp_plane.py。
 
 输出：data/trajectories/trajectories_3d_v2.pkl
     list[np.ndarray]，每条轨迹 shape (N, 4)：frame, X, Y, Z（单位随标定，mm）
@@ -40,6 +58,11 @@ MIN_TRAJ_LEN = 30       # 参与匹配的最短轨迹
 DEPTH_RANGE = (2500, 10000)  # 三角化后中位深度合理范围 mm（FS 实测 3.7–9m 加余量）
 MAX_EXTENT_UV = 1500.0  # 单条轨迹水平跨度上限 mm（防 ID 串接）
 ACCEPT_MED_DY = 3.0     # 片段级接受的矫正 |dy| 中位数上限 px（矫正噪声 ~1-2px，仍很严格）
+# 视差平面先验（位置相关）：d_pred = a·x + b·y + c，在片段对的左图矫正坐标均值处评估。
+# 长峰波沿波峰（≈极线）方向 dy≈0/视差恒定对错配同样成立，几何门欠约束，用该先验消歧；
+# None 关闭。下方系数已经交叉验证确定（详见模块 docstring；重拟合用 fit_disp_plane.py）。
+DISP_PLANE = (-1.066372e-02, 3.550762e-01, 334.989789)
+DISP_PLANE_TOL = 15.0   # |med_disp − d_pred| 容差 px（真家族相干核 ~3px，错配族在 ±100px 以外）
 
 
 # ---------------- pickle 兼容桩类（轨迹对象的类定义在各 03 脚本里） ----------------
@@ -102,21 +125,29 @@ class StrictWaveKalmanFilter(SimpleKalmanFilter):
 # ----------------------------------------------------------------------
 
 def rectify_traj(traj, K, D, R_rect, P_rect):
-    """轨迹 {frame: (x,y)} → 矫正坐标系下的 {frame: (x',y')}"""
+    """轨迹 {frame: (x,y)} → 矫正坐标系下的 {frame: (x',y')}。
+
+    canonical 2D 轨迹 pkl 的点已经在 npz 矫正图坐标系（实证见模块 docstring），
+    故本函数直通——旧版在此 undistortPoints(R1/R2/P1/P2) 是重复矫正，
+    导致匹配判据与三角化全部建立在错误坐标上。
+    K/D/R_rect/P_rect 保留仅为兼容调用签名；
+    若换成原始相机系轨迹（非 canonical），需恢复旧路径：
+    cv2.undistortPoints(pts, K, D, R=R_rect, P=P_rect)。"""
     frames = sorted(traj.points.keys())
-    pts = np.array([traj.points[f] for f in frames], dtype=np.float64).reshape(-1, 1, 2)
-    out = cv2.undistortPoints(pts, K, D, R=R_rect, P=P_rect).reshape(-1, 2)
-    return frames, out
+    pts = np.array([traj.points[f] for f in frames], dtype=np.float64)
+    return frames, pts
 
 
 def match_pairs(rect_left, rect_right):
     """rect_*: list of (frames, pts[N,2])。返回 [(iL, jR, stats)]。
-    成本 = 共同帧上 |dy| 的中位数；硬过滤：视差范围与波动。"""
+    成本 = 共同帧上 |dy| 的中位数；硬过滤：视差范围与波动；
+    DISP_PLANE 设置时再按位置相关视差平面先验过滤（消波峰方向欠约束）。"""
     nL, nR = len(rect_left), len(rect_right)
     pos_l = [{f: k for k, f in enumerate(fl)} for fl, _ in rect_left]
     pos_r = [{f: k for k, f in enumerate(fr)} for fr, _ in rect_right]
     cost = np.full((nL, nR), np.inf)
     stats_grid = {}
+    n_plane_rej = 0
     for i, (fl, pl) in enumerate(rect_left):
         fset_l = set(fl)
         for j, (fr, pr) in enumerate(rect_right):
@@ -134,8 +165,18 @@ def match_pairs(rect_left, rect_right):
                 continue
             if std_disp > MAX_DISP_STD:
                 continue
+            if DISP_PLANE is not None:
+                # 视差平面先验：取左片段矫正坐标均值处预测视差，超容差拒绝
+                mx, my = pl[il, 0].mean(), pl[il, 1].mean()
+                d_pred = DISP_PLANE[0] * mx + DISP_PLANE[1] * my + DISP_PLANE[2]
+                if abs(med_disp - d_pred) > DISP_PLANE_TOL:
+                    n_plane_rej += 1
+                    continue
             cost[i, j] = med_dy + 0.05 * std_disp
             stats_grid[(i, j)] = (len(common), med_dy, med_disp, std_disp)
+    if DISP_PLANE is not None:
+        print(f"[视差平面] d = {DISP_PLANE[0]:.3e}·x {DISP_PLANE[1]:+.3e}·y "
+              f"{DISP_PLANE[2]:+.1f}，TOL={DISP_PLANE_TOL:.0f}px：拒绝 {n_plane_rej} 对")
     # 用大数代替 inf 再做指派（inf 在"两行只有一个共同可行列"时会判 infeasible），
     # 指派后按真实成本阈值过滤。
     # 注意：匈牙利 1-to-1 结果仅用于日志对照，不参与接受决策——
@@ -160,14 +201,15 @@ def match_pairs(rect_left, rect_right):
 
 
 def triangulate_pairs(pairs, rect_left, rect_right, raw_left, raw_right, P1, P2):
-    """对匹配对按共同帧三角化（标准 OpenCV 矫正双目三角化）：
-    1) undistortPoints 带 R1/R2 → 左右点成为"矫正坐标系"下的归一化光线；
-    2) 用矫正投影的归一化形式 P1r=[I|0]、P2r=[I|t'] 三角化
-       （t' 由矫正 P2 提取：P2=K'[I|t']，t'=inv(K')@P2[:,3]，≈(-B,0,0)）；
-    3) 三角化结果在矫正左目坐标系，左乘 R1.T 转回原左目坐标系输出。
-    （旧实现去畸变不带 R1/R2——光线留在原始相机系——却配矫正系的 P 阵，
-    两个坐标系差 ~8.5°，合成数据往返误差中位 ~26m，属坐标系混用。）
-    R1/R2 与 KL/DL/KR/DR 同为模块级全局（__main__ 块或调用方赋值）。"""
+    """对匹配对按共同帧三角化（矫正双目；输入点已在矫正图坐标系）：
+    1) canonical 2D 轨迹点已是矫正像素（实证见模块 docstring），用矫正内参
+       K'（= P1[:, :3]，P1=K'[I|0]）归一化即得矫正系光线——无畸变、不再旋转
+       （旧版 undistortPoints+R1/R2 是在重复矫正，坐标系双重错位）；
+    2) 以 P1r=[I|0]、P2r=[I|t'] 三角化（t'=inv(P2[:,:3])@P2[:,3]，≈(-B,0,0)）；
+    3) 结果左乘 R1.T 转回原左目坐标系输出（行向量写法 xyz @ R1）。
+    若换成原始相机系轨迹，需恢复旧路径：cv2.undistortPoints(pts, K, D, R=R1/R2)。
+    R1 与 KL/DL/KR/DR/R2 同为模块级全局（__main__ 块或调用方赋值；本函数只用 R1）。"""
+    K_rect_inv = np.linalg.inv(P1[:, :3])
     t_rect = np.linalg.inv(P2[:, :3]) @ P2[:, 3]
     P1r = np.hstack([np.eye(3), np.zeros((3, 1))])
     P2r = np.hstack([np.eye(3), t_rect.reshape(3, 1)])
@@ -178,8 +220,8 @@ def triangulate_pairs(pairs, rect_left, rect_right, raw_left, raw_right, P1, P2)
         common = sorted(set(fl) & set(fr))
         pl = np.array([raw_left[iL].points[f] for f in common], dtype=np.float64)
         pr = np.array([raw_right[jR].points[f] for f in common], dtype=np.float64)
-        pl_n = cv2.undistortPoints(pl.reshape(-1, 1, 2), KL, DL, R=R1).reshape(-1, 2)
-        pr_n = cv2.undistortPoints(pr.reshape(-1, 1, 2), KR, DR, R=R2).reshape(-1, 2)
+        pl_n = (K_rect_inv @ np.c_[pl, np.ones(len(pl))].T).T[:, :2]
+        pr_n = (K_rect_inv @ np.c_[pr, np.ones(len(pr))].T).T[:, :2]
         pts4 = cv2.triangulatePoints(P1r, P2r, pl_n.T, pr_n.T)
         xyz = (pts4[:3] / pts4[3]).T
         xyz = xyz @ R1  # 行向量写法：X_cam1 = R1.T @ X_rect

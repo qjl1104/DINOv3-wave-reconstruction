@@ -40,7 +40,8 @@ def score_candidates(candidates, rect_left, rect_right, td_l, td_r):
 
 def extended_candidates(rect_left, rect_right, td_l, td_r):
     """扩展候选：dy 与视差范围满足、视差波动放宽到 RELAX_DISP_STD 的未入候选对
-    （match_pairs 的 stats_grid 拿不到被 std 门拒的对，这里直接重算）。"""
+    （match_pairs 的 stats_grid 拿不到被 std 门拒的对，这里直接重算）。
+    与 match_pairs 共用 rr.DISP_PLANE 视差平面先验——否则串号错配会从放宽窗口重新混入。"""
     ext = []
     for i, (fl, pl) in enumerate(rect_left):
         fset_l = set(fl)
@@ -59,6 +60,13 @@ def extended_candidates(rect_left, rect_right, td_l, td_r):
                 continue
             if std_disp <= rr.MAX_DISP_STD or std_disp > RELAX_DISP_STD:
                 continue  # std ≤ MAX_DISP_STD 的已在几何候选里
+            if rr.DISP_PLANE is not None:
+                # 同 match_pairs：左片段矫正坐标均值处预测视差，超容差拒绝
+                mx, my = pl[il, 0].mean(), pl[il, 1].mean()
+                d_pred = (rr.DISP_PLANE[0] * mx + rr.DISP_PLANE[1] * my
+                          + rr.DISP_PLANE[2])
+                if abs(med_disp - d_pred) > rr.DISP_PLANE_TOL:
+                    continue
             sim, nsim = pair_dino_sim(td_l[i], td_r[j], common)
             ext.append(dict(i=i, j=j, st=(len(common), med_dy, med_disp, std_disp),
                             sim=sim, nsim=nsim))

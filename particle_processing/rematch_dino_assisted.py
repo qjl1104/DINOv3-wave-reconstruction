@@ -54,6 +54,8 @@ CALIB = os.path.join(ROOT, "camera_calibration/params/stereo_calib_params_from_m
 OUT_PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_repro_dino.pkl")
 
 MAX_NN_DIST = 3.0      # 轨迹点 → 检测点归属上限 px
+# 视差平面先验开关在 rematch_rectified（rr.DISP_PLANE / rr.DISP_PLANE_TOL，默认开启，
+# 系数已交叉验证）：消长峰波沿波峰（≈极线）方向的匹配欠约束；重拟合用 fit_disp_plane.py。
 
 
 def load_det_desc(det_pkl, desc_pkl):
