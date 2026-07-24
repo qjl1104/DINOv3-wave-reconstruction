@@ -328,8 +328,8 @@ def diag_xcorr(series):
     print(f"[phase] 第二遍（全对展开）: c = {c2:.0f} mm/s = "
           f"{c2 / 1000:.3f} m/s | 方向角 {theta:.1f}°（PCA u-v 面内）| "
           f"时滞残差 RMS {np.sqrt(np.mean(res ** 2)) * 1000:.0f} ms")
-    print(f"[phase] 深水理论参考 {C_THEORY:.0f} mm/s | 偏差 "
-          f"{abs(c2 - C_THEORY) / C_THEORY:.1%}（正确几何下本数据已排除该理论值）")
+    print(f"[phase] 深水理论 {C_THEORY:.0f} mm/s | 偏差 "
+          f"{abs(c2 - C_THEORY) / C_THEORY:.1%}")
 
     # 自助法（重采样轨迹对）估计 c 的不确定度
     rng = np.random.default_rng(1)
@@ -353,7 +353,7 @@ def diag_xcorr(series):
     ax[1].scatter(proj, taus, s=25, alpha=0.7)
     xs = np.linspace(proj.min(), proj.max(), 10)
     ax[1].plot(xs, xs * 1000 / c2, "r-", label=f"fit c={c2:.0f} mm/s")
-    ax[1].plot(xs, xs / (C_THEORY / 1000), "g--", label=f"deep-water theory {C_THEORY:.0f} mm/s (excluded)")
+    ax[1].plot(xs, xs / (C_THEORY / 1000), "g--", label=f"deep-water theory {C_THEORY:.0f} mm/s")
     ax[1].set_xlabel("projected separation (m)"); ax[1].set_ylabel("lag tau (s)")
     ax[1].legend(); ax[1].set_title("lag vs separation along wave dir")
     if len(near):
