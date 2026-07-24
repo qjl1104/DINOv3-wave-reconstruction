@@ -32,8 +32,8 @@ for _n in ["Track", "UltraTrack", "WaveParticleTrack", "StrictTrack",
     setattr(__main__, _n, getattr(rr, _n))
 
 CALIB = os.path.join(ROOT, "camera_calibration/params/stereo_calib_params_from_matlab_full.npz")
-TRAJ_L = os.path.join(ROOT, "data/trajectories/trajectories_2d_left_optimized.pkl")
-TRAJ_R = os.path.join(ROOT, "data/trajectories/trajectories_2d_right_optimized.pkl")
+TRAJ_L = os.path.join(ROOT, "data/trajectories/trajectories_2d_left_jumpcut.pkl")
+TRAJ_R = os.path.join(ROOT, "data/trajectories/trajectories_2d_right_jumpcut.pkl")
 
 MIN_COVER = 0.8     # 认领轨迹的帧覆盖率下限
 MAX_PROJ_DIST = 3.0  # 认领轨迹的逐帧投影距离中位数上限 px（重投影噪声 ~1.5px）

@@ -29,7 +29,7 @@ def main():
     side = sys.argv[1]
     img_dir = os.path.join(ROOT, "data", f"{side}_images")
     traj_pkl = os.path.join(ROOT, "data/trajectories",
-                            f"trajectories_2d_{side}_optimized.pkl")
+                            f"trajectories_2d_{side}_jumpcut.pkl")  # 跳切清洗后的生产输入
     out_pkl = os.path.join(HERE, f"desc_v2tracks_{side}.pkl")
 
     # v2 轨迹 pkl 是 __main__.Track 系列，用 rematch 的桩类接管

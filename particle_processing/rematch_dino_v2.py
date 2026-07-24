@@ -44,10 +44,8 @@ OUT_PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl")
 
 
 def main():
-    raw_left = pickle.load(open(os.path.join(
-        ROOT, "data/trajectories/trajectories_2d_left_optimized.pkl"), "rb"))
-    raw_right = pickle.load(open(os.path.join(
-        ROOT, "data/trajectories/trajectories_2d_right_optimized.pkl"), "rb"))
+    raw_left = pickle.load(open(rr.TRAJ_L, "rb"))
+    raw_right = pickle.load(open(rr.TRAJ_R, "rb"))
     td_l = pickle.load(open(os.path.join(ROOT, "DINOv3/desc_v2tracks_left.pkl"), "rb"))
     td_r = pickle.load(open(os.path.join(ROOT, "DINOv3/desc_v2tracks_right.pkl"), "rb"))
     calib = np.load(CALIB)

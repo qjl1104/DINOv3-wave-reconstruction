@@ -11,8 +11,10 @@
   [5] 最终可视化（final_visualize.py）
       → wave_modeling/real_run/final_result.png + final_field.npz
 
-前置输入（canonical，勿删）：data/trajectories/trajectories_2d_*_optimized.pkl、
-data/left_images、data/right_images、DINOv3/dinov3-base-model、标定参数。
+前置输入（canonical，勿删）：data/trajectories/trajectories_2d_*_optimized.pkl
+（03 跟踪原始输出，存档）；生产默认用其跳切清洗版 trajectories_2d_*_jumpcut.pkl
+（clean_tracks_jumpcut.py 生成，身份干净）。
+另有：data/left_images、data/right_images、DINOv3/dinov3-base-model、标定参数。
 
 用法：.venv_fs/Scripts/python.exe run_full_pipeline.py [--force-desc]
 """
@@ -28,8 +30,8 @@ ENV = dict(os.environ, PYTHONIOENCODING="utf-8")
 
 DESC_L = os.path.join(ROOT, "DINOv3/desc_v2tracks_left.pkl")
 DESC_R = os.path.join(ROOT, "DINOv3/desc_v2tracks_right.pkl")
-TRAJ_2D_L = os.path.join(ROOT, "data/trajectories/trajectories_2d_left_optimized.pkl")
-TRAJ_2D_R = os.path.join(ROOT, "data/trajectories/trajectories_2d_right_optimized.pkl")
+TRAJ_2D_L = os.path.join(ROOT, "data/trajectories/trajectories_2d_left_jumpcut.pkl")
+TRAJ_2D_R = os.path.join(ROOT, "data/trajectories/trajectories_2d_right_jumpcut.pkl")
 TRAJ_3D = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl")
 PINN_PT = os.path.join(ROOT, "wave_modeling/real_run/pinn_real.pt")
 FINAL_PNG = os.path.join(ROOT, "wave_modeling/real_run/final_result.png")

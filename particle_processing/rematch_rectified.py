@@ -43,8 +43,11 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRAJ_L = os.path.join(ROOT, "data/trajectories/trajectories_2d_left_optimized.pkl")
-TRAJ_R = os.path.join(ROOT, "data/trajectories/trajectories_2d_right_optimized.pkl")
+TRAJ_L = os.path.join(ROOT, "data/trajectories/trajectories_2d_left_jumpcut.pkl")
+TRAJ_R = os.path.join(ROOT, "data/trajectories/trajectories_2d_right_jumpcut.pkl")
+# 注：*_optimized.pkl 是 03 跟踪原始输出（含跨泡沫跳号的身份污染，实测左 97%/右 88%
+# 轨迹含 >12px 跳变）；*_jumpcut.pkl 是 clean_tracks_jumpcut.py 的跳切清洗产物，
+# 为生产默认输入。要回到原始轨迹只需把上面两行改回 _optimized。
 CALIB = os.path.join(ROOT, "camera_calibration/params/stereo_calib_params_from_matlab_full.npz")
 OUT_PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2.pkl")
 OUT_PNG = os.path.join(ROOT, "data/trajectories/rematch_diagnostic.png")
