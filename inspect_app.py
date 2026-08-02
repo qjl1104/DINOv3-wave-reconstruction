@@ -218,8 +218,10 @@ def tab_overview():
     chain = [
         ("2D 轨迹 jumpcut (左)", TRAJ2D["left"], []),
         ("2D 轨迹 jumpcut (右)", TRAJ2D["right"], []),
-        ("DINO 描述子 (左)", os.path.join(ROOT, "DINOv3/desc_v3apptracks_left.pkl"), [TRAJ2D["left"]]),
-        ("DINO 描述子 (右)", os.path.join(ROOT, "DINOv3/desc_v3apptracks_right.pkl"), [TRAJ2D["right"]]),
+        ("DINO 描述子 (左, 生产 v3nf)", os.path.join(ROOT, "DINOv3/desc_v3nftracks_left.pkl"), [TRAJ2D["left"]]),
+        ("DINO 描述子 (右, 生产 v3nf)", os.path.join(ROOT, "DINOv3/desc_v3nftracks_right.pkl"), [TRAJ2D["right"]]),
+        ("DINO 描述子 (左, 对照 v3app)", os.path.join(ROOT, "DINOv3/desc_v3apptracks_left.pkl"), [TRAJ2D["left"]]),
+        ("DINO 描述子 (右, 对照 v3app)", os.path.join(ROOT, "DINOv3/desc_v3apptracks_right.pkl"), [TRAJ2D["right"]]),
         ("3D 轨迹 (v3nf_hung)", TRAJ3D, [TRAJ2D["left"], TRAJ2D["right"]]),
         ("PINN 模型", PINN_PT, [TRAJ3D]),
         ("最终场 npz", FIELD_NPZ, [PINN_PT]),
@@ -679,7 +681,8 @@ def tab_reference():
                 lag = np.argmax(cc) - (len(e) - 1)
                 fig.add_trace(go.Scatter(x=d[:, 0], y=np.roll(e, lag) + d[:, 1].mean(),
                                          mode="lines", name="本项目最长轨迹 η(t)（互相关对齐）"))
-                st.caption(f"互相关对齐时延 {lag * 5} ms；浪高仪曲线的绝对相位无物理意义，仅比波形/波幅。")
+                dt_ms = float(np.median(np.diff(d[:, 0]))) * 1000  # 从数据求采样间隔，勿硬编码
+                st.caption(f"互相关对齐时延 {lag * dt_ms:.0f} ms；浪高仪曲线的绝对相位无物理意义，仅比波形/波幅。")
         except Exception as ex:
             st.info(f"己方轨迹叠加失败: {ex}")
         fig.update_layout(height=400, xaxis_title="t (s)", yaxis_title="η (mm)")
@@ -691,7 +694,7 @@ def tab_reference():
         "造波理论值": ["40.0", "0.79", "2.51157", "2.5017"],
         "浪高仪 50s(严)": ["40.09988", "0.78994", "2.51119", "-"],
         "严志勇双目 2959 帧": ["40.45338 ± 0.53", "0.782175", "2.46206 ± 0.03", "-"],
-        "本项目目标": ["≈40（当前 PINN 中心 ~23，待修）", "0.79", "-", "≈2.5"],
+        "本项目目标": ["≈40（当前 PINN 中心 39.0）", "0.79", "-", "≈2.5"],
     })
     st.caption("来源：yan2021_reference_values.json。误差基准（严 vs 浪高仪）：波幅 0.88% / 波数 1.96% / 频率 0.98%。")
 

@@ -28,6 +28,7 @@ c 固定为互谱相位法实测值（--c 可覆盖；反演不可靠，见 main
 用法：.venv_fs/Scripts/python.exe wave_modeling/run_real_pinn.py
 """
 
+import argparse
 import os
 import pickle
 import sys
@@ -39,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pinn_v2 import PINNWaveV2, train_pinn  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl")
+PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v3nf_hung_dino.pkl")
 OUT = os.path.join(ROOT, "wave_modeling/real_run")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 FPS = 50.0          # 采集帧率（刘晔恒论文：50 Hz）
@@ -261,16 +262,19 @@ def measure_direction(series):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    # 可用 argv[1] 指定轨迹 pkl（默认 canonical v2_dino）；--c <mm/s> 覆盖 c 先验
-    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
-    pkl = argv[0] if argv else PKL
-    c_override = None
-    if "--c" in sys.argv:
-        c_override = float(sys.argv[sys.argv.index("--c") + 1])
-    # --tag xxx → 输出 field_comparison_xxx.png / pinn_real_xxx.pt（不覆盖生产产物）
-    tag = ""
-    if "--tag" in sys.argv:
-        tag = "_" + sys.argv[sys.argv.index("--tag") + 1]
+    ap = argparse.ArgumentParser(
+        description="方向先验 PINN 真实数据训练 + 片段级留出评估")
+    ap.add_argument("pkl", nargs="?", default=PKL,
+                    help=f"轨迹 pkl（默认 canonical: {os.path.basename(PKL)}）")
+    ap.add_argument("--c", type=float, default=None, metavar="MM_S",
+                    help="覆盖 c 先验（mm/s），默认互谱实测")
+    ap.add_argument("--tag", default="",
+                    help="输出加 _xxx 后缀（field_comparison_xxx.png / pinn_real_xxx.pt），"
+                         "不覆盖生产产物")
+    args = ap.parse_args()
+    pkl = args.pkl
+    c_override = args.c
+    tag = ("_" + args.tag.lstrip("_")) if args.tag else ""
     print(f"[输入] {pkl}")
     # 片段级划分 + 仅训练片段拟合预处理（防泄漏，见文件头与 prepare_data_split）
     d = prepare_data_split(pkl)
