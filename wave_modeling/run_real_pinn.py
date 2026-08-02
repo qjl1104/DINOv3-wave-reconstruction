@@ -267,6 +267,10 @@ def main():
     c_override = None
     if "--c" in sys.argv:
         c_override = float(sys.argv[sys.argv.index("--c") + 1])
+    # --tag xxx → 输出 field_comparison_xxx.png / pinn_real_xxx.pt（不覆盖生产产物）
+    tag = ""
+    if "--tag" in sys.argv:
+        tag = "_" + sys.argv[sys.argv.index("--tag") + 1]
     print(f"[输入] {pkl}")
     # 片段级划分 + 仅训练片段拟合预处理（防泄漏，见文件头与 prepare_data_split）
     d = prepare_data_split(pkl)
@@ -387,15 +391,15 @@ def main():
     else:
         ax[2].text(0.5, 0.5, "band too sparse", ha="center", va="center")
     fig.tight_layout()
-    png = os.path.join(OUT, "field_comparison.png")
+    png = os.path.join(OUT, f"field_comparison{tag}.png")
     fig.savefig(png, dpi=150)
     torch.save({"model": model.state_dict(), "bounds": bounds,
                 "plane_centroid": c0, "plane_normal": n,
                 # 传播坐标系旋转矩阵（未旋转时为单位阵）：预测前需先把
                 # 原始 (u,v) 右乘 rot.T 变换到 ξ-ζ 坐标
                 "rot": R if rotated else np.eye(2)},
-               os.path.join(OUT, "pinn_real.pt"))
-    print(f"[输出] {png} 与 {OUT}/pinn_real.pt 已保存")
+               os.path.join(OUT, f"pinn_real{tag}.pt"))
+    print(f"[输出] {png} 与 {OUT}/pinn_real{tag}.pt 已保存")
 
 
 if __name__ == "__main__":

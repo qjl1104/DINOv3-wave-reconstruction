@@ -42,9 +42,11 @@ STEP_PER_FRAME = 4.0   # 断档跨帧时按间隔放宽的每帧上限 px/帧
 MIN_SEG = 20           # 切后段长下限（与 rematch 的 MIN_OVERLAP 对齐）
 
 
-def clean_side(side):
-    src = os.path.join(ROOT, f"data/trajectories/trajectories_2d_{side}_optimized.pkl")
-    dst = os.path.join(ROOT, f"data/trajectories/trajectories_2d_{side}_jumpcut.pkl")
+def clean_side(side, src=None, dst=None):
+    if src is None:
+        src = os.path.join(ROOT, f"data/trajectories/trajectories_2d_{side}_optimized.pkl")
+    if dst is None:
+        dst = os.path.join(ROOT, f"data/trajectories/trajectories_2d_{side}_jumpcut.pkl")
     with open(src, "rb") as f:
         tracks = pickle.load(f)
 
@@ -81,6 +83,16 @@ def clean_side(side):
 
 
 def main():
+    # 用法 A（原样）: clean_tracks_jumpcut.py [left|right|both]
+    # 用法 B（自定义路径）: clean_tracks_jumpcut.py --src SRC_L SRC_R --dst DST_L DST_R
+    if "--src" in sys.argv:
+        i = sys.argv.index("--src")
+        srcs = sys.argv[i + 1:i + 3]
+        j = sys.argv.index("--dst")
+        dsts = sys.argv[j + 1:j + 3]
+        for side, src, dst in zip(["left", "right"], srcs, dsts):
+            clean_side(side, src, dst)
+        return
     sides = sys.argv[1:] if len(sys.argv) > 1 else ["left", "right"]
     if sides == ["both"]:
         sides = ["left", "right"]

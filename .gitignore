@@ -72,3 +72,7 @@ wave_modeling/real_run/
 thesis_extract.txt
 paper_binocular_extract.txt
 prep_*.jpg
+
+# 论文提取与调试图像暂存区（大二进制）
+.ref_extract/
+DINOv3_review_branch/

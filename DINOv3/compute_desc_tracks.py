@@ -1,10 +1,11 @@
 # DINOv3/compute_desc_tracks.py
 """
-在原始灰度图上计算 2D 轨迹点处的 DINOv3 描述子（供 rematch_dino_assisted 的
-v2 轨迹辅助匹配）。轨迹点是原始相机坐标，直接在原始图像（未矫正）上采样，
-无需检测 pkl——逐帧前向后按轨迹点双线性采样，不存稠密特征图。
+在矫正灰度图上计算 2D 轨迹点处的 DINOv3 描述子（供 rematch_dino_assisted 的
+v2 轨迹辅助匹配）。轨迹点是矫正系坐标（检测在矫正图上做），故先在原始图上
+按标定 remap 矫正，再逐帧前向后按轨迹点双线性采样，不存稠密特征图。
+（2026-07-29 修复：旧版直接在原始图采样，坐标错位 10-24px。）
 
-用法：../.venv_fs/Scripts/python.exe compute_desc_tracks.py <left|right>
+用法：../.venv_fs/Scripts/python.exe compute_desc_tracks.py <left|right> [轨迹pkl 输出pkl]
 输出：desc_v2tracks_{side}.pkl —— list[dict{frame: (768,) fp32}]，与轨迹顺序一致
 """
 
@@ -28,9 +29,9 @@ PATCH = 16
 def main():
     side = sys.argv[1]
     img_dir = os.path.join(ROOT, "data", f"{side}_images")
-    traj_pkl = os.path.join(ROOT, "data/trajectories",
-                            f"trajectories_2d_{side}_jumpcut.pkl")  # 跳切清洗后的生产输入
-    out_pkl = os.path.join(HERE, f"desc_v2tracks_{side}.pkl")
+    traj_pkl = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
+        ROOT, "data/trajectories", f"trajectories_2d_{side}_jumpcut.pkl")  # 跳切清洗后的生产输入
+    out_pkl = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, f"desc_v2tracks_{side}.pkl")
 
     # v2 轨迹 pkl 是 __main__.Track 系列，用 rematch 的桩类接管
     sys.path.insert(0, os.path.join(ROOT, "particle_processing"))
@@ -65,6 +66,10 @@ def main():
 
     exts = (".bmp", ".png", ".jpg")
     img_files = sorted(f for f in os.listdir(img_dir) if f.lower().endswith(exts))
+    # 轨迹点是矫正系坐标（检测在矫正图上做），描述子必须在矫正图上采样；
+    # 旧版直接在原始图采样，坐标错位 10-24px（2026-07-29 修复）
+    calib = np.load(os.path.join(ROOT, "camera_calibration/params/stereo_calib_params_from_matlab_full.npz"))
+    map1, map2 = calib[f"map1_{side}"], calib[f"map2_{side}"]
     out = [dict() for _ in tracks]
     t0 = __import__("time").time()
     for fi, fname in enumerate(img_files):
@@ -73,6 +78,7 @@ def main():
         img = cv2.imread(os.path.join(img_dir, fname), 0)
         if img is None:
             continue
+        img = cv2.remap(img, map1, map2, cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         t = torch.from_numpy(rgb.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
         t = pad_to_patch_size(t, patch_size=PATCH)[0]

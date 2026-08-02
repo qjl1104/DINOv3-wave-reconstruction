@@ -44,10 +44,19 @@ OUT_PKL = os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl")
 
 
 def main():
-    raw_left = pickle.load(open(rr.TRAJ_L, "rb"))
-    raw_right = pickle.load(open(rr.TRAJ_R, "rb"))
-    td_l = pickle.load(open(os.path.join(ROOT, "DINOv3/desc_v2tracks_left.pkl"), "rb"))
-    td_r = pickle.load(open(os.path.join(ROOT, "DINOv3/desc_v2tracks_right.pkl"), "rb"))
+    # 可选路径覆盖: rematch_dino_v2.py [traj_l traj_r desc_l desc_r out_pkl] [--hung-only]
+    # --hung-only: 只做匈牙利一对一匹配（最严口径，生产 canonical 用）
+    pos = [a for a in sys.argv[1:] if not a.startswith("--")]
+    hung_only = "--hung-only" in sys.argv
+    traj_l = pos[0] if len(pos) > 0 else rr.TRAJ_L
+    traj_r = pos[1] if len(pos) > 1 else rr.TRAJ_R
+    desc_l = pos[2] if len(pos) > 2 else os.path.join(ROOT, "DINOv3/desc_v2tracks_left.pkl")
+    desc_r = pos[3] if len(pos) > 3 else os.path.join(ROOT, "DINOv3/desc_v2tracks_right.pkl")
+    out_pkl = pos[4] if len(pos) > 4 else OUT_PKL
+    raw_left = pickle.load(open(traj_l, "rb"))
+    raw_right = pickle.load(open(traj_r, "rb"))
+    td_l = pickle.load(open(desc_l, "rb"))
+    td_r = pickle.load(open(desc_r, "rb"))
     calib = np.load(CALIB)
     KL, DL = calib["K_left"], calib["D_left"].ravel()
     KR, DR = calib["K_right"], calib["D_right"].ravel()
@@ -66,32 +75,37 @@ def main():
     hungarian, candidates = rr.match_pairs(rect_left, rect_right)
     print(f"[几何] 匈牙利 {len(hungarian)} 对；硬过滤候选 {len(candidates)} 对")
 
-    rows = dc.score_candidates(candidates, rect_left, rect_right, td_l, td_r)
-    sims = np.array([r["sim"] for r in rows if r["nsim"] >= dc.MIN_NSIM])
-    if len(sims):
-        print(f"[DINO] 几何候选相似度：med {np.median(sims):.3f} "
-              f"p25 {np.percentile(sims, 25):.3f} p75 {np.percentile(sims, 75):.3f} "
-              f"min {sims.min():.3f}")
+    if hung_only:
+        # 匈牙利一对一模式：直接用匈牙利对，不做候选扩展/DINO 门
+        pairs = [(i, j, st) for (i, j, st) in hungarian]
+        print(f"[匈牙利一对一] {len(pairs)} 对直接三角化")
+    else:
+        rows = dc.score_candidates(candidates, rect_left, rect_right, td_l, td_r)
+        sims = np.array([r["sim"] for r in rows if r["nsim"] >= dc.MIN_NSIM])
+        if len(sims):
+            print(f"[DINO] 几何候选相似度：med {np.median(sims):.3f} "
+                  f"p25 {np.percentile(sims, 25):.3f} p75 {np.percentile(sims, 75):.3f} "
+                  f"min {sims.min():.3f}")
 
-    ext = dc.extended_candidates(rect_left, rect_right, td_l, td_r)
-    print(f"[放宽] 视差波动 {rr.MAX_DISP_STD:.0f}–{dc.RELAX_DISP_STD:.0f}px 扩展候选 {len(ext)} 对")
+        ext = dc.extended_candidates(rect_left, rect_right, td_l, td_r)
+        print(f"[放宽] 视差波动 {rr.MAX_DISP_STD:.0f}–{dc.RELAX_DISP_STD:.0f}px 扩展候选 {len(ext)} 对")
 
-    acc, rej = dc.dino_accept(rows)
-    acc_ext, _ = dc.dino_accept(ext)
-    print(f"[接受] 几何候选×DINO≥{dc.DINO_GATE}: {len(acc)}/{len(rows)} 对（拒 {len(rej)} 对）；"
-          f"扩展×DINO: {len(acc_ext)}/{len(ext)} 对")
-    if rej:
-        print(f"  被拒对相似度：{[round(r['sim'], 2) for r in rej]}")
-    pairs = [(r["i"], r["j"], r["st"]) for r in acc + acc_ext]
+        acc, rej = dc.dino_accept(rows)
+        acc_ext, _ = dc.dino_accept(ext)
+        print(f"[接受] 几何候选×DINO≥{dc.DINO_GATE}: {len(acc)}/{len(rows)} 对（拒 {len(rej)} 对）；"
+              f"扩展×DINO: {len(acc_ext)}/{len(ext)} 对")
+        if rej:
+            print(f"  被拒对相似度：{[round(r['sim'], 2) for r in rej]}")
+        pairs = [(r["i"], r["j"], r["st"]) for r in acc + acc_ext]
 
     trajs_3d = rr.triangulate_pairs(pairs, rect_left, rect_right,
                                     raw_left, raw_right, P1, P2)
     kept = dc.quality_filter(trajs_3d)
     print(f"三角化后质量过滤：{len(kept)}/{len(trajs_3d)} 条保留，"
           f"总点 {sum(len(t) for t in kept)}（基线 v2：46 条 / 9866 点）")
-    with open(OUT_PKL, "wb") as f:
+    with open(out_pkl, "wb") as f:
         pickle.dump(kept, f)
-    print(f"[输出] {OUT_PKL}")
+    print(f"[输出] {out_pkl}")
 
 
 if __name__ == "__main__":
