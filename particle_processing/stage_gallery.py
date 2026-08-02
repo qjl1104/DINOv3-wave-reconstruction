@@ -65,7 +65,7 @@ def stage2(calib):
 
 
 def stage3(calib):
-    with open(os.path.join(ROOT, "data/trajectories/trajectories_2d_left_jumpcut.pkl"), "rb") as f:
+    with open(os.path.join(ROOT, "data/trajectories/trajectories_2d_left_v3nf_jumpcut.pkl"), "rb") as f:
         tracks = pickle.load(f)
     rect = cv2.cvtColor(
         rectify(cv2.imread(os.path.join(ROOT, "data/left_images/left0001.bmp"), 0), calib, "left"),
@@ -84,7 +84,7 @@ def stage3(calib):
 
 def stage4(calib):
     """取覆盖点最多的一帧，把该帧匹配点投回左右矫正图并连线。"""
-    with open(os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl"), "rb") as f:
+    with open(os.path.join(ROOT, "data/trajectories/trajectories_3d_v3nf_hung_dino.pkl"), "rb") as f:
         trajs = pickle.load(f)
     from collections import Counter
     cnt = Counter()
@@ -127,7 +127,7 @@ def stage5(calib):
     import matplotlib.pyplot as plt
     plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
     plt.rcParams["axes.unicode_minus"] = False
-    with open(os.path.join(ROOT, "data/trajectories/trajectories_3d_v2_dino.pkl"), "rb") as f:
+    with open(os.path.join(ROOT, "data/trajectories/trajectories_3d_v3nf_hung_dino.pkl"), "rb") as f:
         trajs = pickle.load(f)
     pts = np.vstack([t[:, 1:4] for t in trajs if len(t) > 0])
     fr_all = np.concatenate([t[:, 0] for t in trajs if len(t) > 0])
