@@ -37,6 +37,20 @@ MIN_SEP = 300.0        # 轨迹对最小空间间距 mm
 NEAR_SEP = 1000.0      # 第一遍无模糊拟合的最大间距 mm
 
 
+def peak_freq_interp(sp, fq, k):
+    """抛物线插值精化 FFT 峰频（消除零填充栅格 argmax 的量化偏差：
+    8192 栅格 bin=0.78125Hz 会把 0.7833Hz 真峰压低 ~0.3%，
+    论证见 real_run/diag_c_bias_budget_results.txt §3）。"""
+    if k <= 0 or k >= len(sp) - 1:
+        return float(fq[k])
+    y0, y1, y2 = sp[k - 1], sp[k], sp[k + 1]
+    den = y0 - 2.0 * y1 + y2
+    if den == 0.0:
+        return float(fq[k])
+    d = float(np.clip(0.5 * (y0 - y2) / den, -1.0, 1.0))
+    return float(fq[k] + d * (fq[1] - fq[0]))
+
+
 # ---------------------------------------------------------------- A. Hovmöller
 def _bin2d(pts, u_edges, t_edges):
     """pts: [N,3] = (coord, eta, t)。返回 (H, Cnt)。"""
@@ -265,7 +279,7 @@ def diag_xcorr(series):
         sp = np.abs(np.fft.rfft(e * w, 8192))
         fq = np.fft.rfftfreq(8192, 1 / FPS)
         k = np.argmax(sp[1:]) + 1
-        pk_f.append(fq[k])
+        pk_f.append(peak_freq_interp(sp, fq, k))  # 抛物线插值去栅格量化偏差
         pk_a.append(2 * sp[k] / w.sum())  # 窗增益修正：幅值 = 2|X|/Σw（Hann 即 4|X|/N）
     pk_f, pk_a = np.array(pk_f), np.array(pk_a)
     # τ = Δφ/(2π·f) 用实测主峰中位（本数据 ≈0.781Hz），写死论文值 0.79
@@ -320,7 +334,7 @@ def diag_xcorr(series):
     unwrapped = []
     for tau, du, dv, w, sep, r in raw:
         pred = (du * n1[0] + dv * n1[1]) / c1   # s
-        cands = [tau + k * T_WAVE for k in range(-3, 4)]
+        cands = [tau + k * (1.0 / f_meas) for k in range(-3, 4)]  # 候选周期用实测频率（口径修正，见 real_run/diag_c_bias_budget_results.txt §4）
         tau_u = min(cands, key=lambda x: abs(x - pred))
         unwrapped.append((tau_u, du, dv, w))
     c2, n2, res = fit_cn(unwrapped)
@@ -328,8 +342,10 @@ def diag_xcorr(series):
     print(f"[phase] 第二遍（全对展开）: c = {c2:.0f} mm/s = "
           f"{c2 / 1000:.3f} m/s | 方向角 {theta:.1f}°（PCA u-v 面内）| "
           f"时滞残差 RMS {np.sqrt(np.mean(res ** 2)) * 1000:.0f} ms")
-    print(f"[phase] 深水理论 {C_THEORY:.0f} mm/s | 偏差 "
-          f"{abs(c2 - C_THEORY) / C_THEORY:.1%}")
+    c_theory_f = 9.81e3 / (2 * np.pi * f_meas)  # 线性深水色散@实测频率
+    print(f"[phase] 线性深水@实测{f_meas:.3f}Hz {c_theory_f:.0f} mm/s | 偏差 "
+          f"{abs(c2 - c_theory_f) / c_theory_f:.1%}（名义理论 {C_THEORY:.0f} "
+          f"偏差 {abs(c2 - C_THEORY) / C_THEORY:.1%}）")
 
     # 自助法（重采样轨迹对）估计 c 的不确定度
     rng = np.random.default_rng(1)

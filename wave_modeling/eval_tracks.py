@@ -18,7 +18,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from diag_hovmoller_xcorr import F_WAVE, T_WAVE, _phase_pair, fit_cn  # noqa: E402
+from diag_hovmoller_xcorr import F_WAVE, _phase_pair, fit_cn, peak_freq_interp  # noqa: E402
 from run_real_pinn import FPS, C_THEORY  # noqa: E402
 
 MIN_SEP = 300.0
@@ -117,8 +117,9 @@ def evaluate(pkl_path, label):
 
     # τ 换算用实测主峰中位：必须在【带通后】的片段上测（原始谱常被低频
     # 漂移主导，上方 [频] 指标即此现象），且零填充到 8192 精细定位峰频
-    # （短片段未零填充的 df 达 0.5Hz，测到的只是粗bin中心）；
-    # 长片段不足时退回论文值 F_WAVE
+    # （短片段未零填充的 df 达 0.5Hz，测到的只是粗bin中心），峰频再做
+    # 抛物线插值（8192 栅格 argmax 有 ~0.3% 量化偏差）；长片段不足时退回
+    # 论文值 F_WAVE
     pk_bp = []
     for fr, et, _ in frags:
         if len(fr) < 100:
@@ -126,8 +127,9 @@ def evaluate(pkl_path, label):
         e = et - et.mean()
         sp = np.abs(np.fft.rfft(e * np.hanning(len(e)), 8192))
         fq = np.fft.rfftfreq(8192, 1 / FPS)
-        band = (fq >= 0.5) & (fq <= 1.2)
-        pk_bp.append(fq[band][np.argmax(sp[band])])
+        band = np.flatnonzero((fq >= 0.5) & (fq <= 1.2))
+        k = band[np.argmax(sp[band])]
+        pk_bp.append(peak_freq_interp(sp, fq, k))
     f_meas = float(np.median(pk_bp)) if pk_bp else F_WAVE
     raw = []
     for i in range(len(frags)):
@@ -153,16 +155,18 @@ def evaluate(pkl_path, label):
         unwrapped = []
         for tau, du, dv, w, sep, r in raw:
             pred = (du * n1[0] + dv * n1[1]) / c1
-            cands = [tau + k * T_WAVE for k in range(-3, 4)]
+            cands = [tau + k * (1.0 / f_meas) for k in range(-3, 4)]  # 候选周期用实测频率（口径修正，见 real_run/diag_c_bias_budget_results.txt §4）
             unwrapped.append((min(cands, key=lambda x: abs(x - pred)), du, dv, w))
         c2, n2, res = fit_cn(unwrapped)
         rng = np.random.default_rng(1)
         cs = np.array([fit_cn([unwrapped[k] for k in
                                rng.integers(len(unwrapped), size=len(unwrapped))])[0]
                        for _ in range(200)])
-        print(f"[相] c = {c2:.0f} mm/s（深水理论 {C_THEORY:.0f}，偏差 "
-              f"{abs(c2 - C_THEORY) / C_THEORY:.1%}）| 残差 RMS "
-              f"{np.sqrt(np.mean(res ** 2)) * 1000:.0f} ms | 95% CI "
+        c_theory_f = 9.81e3 / (2 * np.pi * f_meas)  # 线性深水色散@实测频率 mm/s
+        print(f"[相] c = {c2:.0f} mm/s（线性深水@实测{f_meas:.3f}Hz "
+              f"{c_theory_f:.0f}，偏差 {abs(c2 - c_theory_f) / c_theory_f:.1%}；"
+              f"名义理论 {C_THEORY:.0f} 偏差 {abs(c2 - C_THEORY) / C_THEORY:.1%}）"
+              f"| 残差 RMS {np.sqrt(np.mean(res ** 2)) * 1000:.0f} ms | 95% CI "
               f"[{np.percentile(cs, 2.5):.0f}, {np.percentile(cs, 97.5):.0f}]")
     else:
         print("[相] 有效对不足，无法测 c")
