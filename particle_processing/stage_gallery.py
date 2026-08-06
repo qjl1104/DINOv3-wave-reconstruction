@@ -150,7 +150,10 @@ def stage5(calib):
     frame_best = cnt.most_common(1)[0][0]
     n2 = np.asarray(ck["rot"])[0]  # 实测传播方向（run_real_pinn 训练时存）
     c3 = pts.mean(0)
-    _, _, vt = np.linalg.svd(pts - c3)
+    # 用协方差 eigh 求基，避免对 29 万点做完整 SVD 的 (N,N) 内存爆炸
+    cov = np.cov((pts - c3).T)
+    _, ev = np.linalg.eigh(cov)  # 列向量，特征值升序
+    vt = ev[:, ::-1].T           # 行基降序：[最大方差, 次大, 法向]
     nvec = vt[2] * np.sign(vt[2][2])
     xs, ys = [], []
     for t in trajs:

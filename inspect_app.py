@@ -501,10 +501,9 @@ def tab_pointcloud():
         st.warning(f"数据集 {variant} 的 3D 轨迹尚未生成")
         return
     mode = st.radio("模式", ["单帧 3D 散点", "全序列点云(抽稀)", "单帧波剖面"], horizontal=True)
-    all_fr = np.concatenate([t[:, 0] for t in trajs if len(t)])
-    f_min, f_max = int(all_fr.min()), int(all_fr.max())
+    fr_has = sorted({int(f) for t in trajs for f in t[:, 0]})
     if mode != "全序列点云(抽稀)":
-        frame0, playing, fps = frame_player("pc", "帧号(0基)", list(range(f_min, f_max + 1)))
+        frame0, playing, fps = frame_player("pc", "帧号(0基)", fr_has)
         pts = np.vstack([t[t[:, 0] == frame0, 1:4] for t in trajs if np.any(t[:, 0] == frame0)])
         st.write(f"frame {frame0}: {len(pts)} 点")
     else:
@@ -564,7 +563,7 @@ def tab_pointcloud():
         fig.update_layout(height=450, xaxis_title="ξ mm", yaxis_title="η mm")
         st.plotly_chart(fig, width='stretch')
     if mode != "全序列点云(抽稀)":
-        frame_player_tick("pc", list(range(f_min, f_max + 1)), fps)
+        frame_player_tick("pc", fr_has, fps)
 
 
 def tab_judge():
@@ -574,17 +573,24 @@ def tab_judge():
                 "的线性深水色散为 **1993 mm/s**（当前生产基线 1992 与之吻合，残余 -0.05%）。")
 
     st.subheader("泡沫影响 A/B 对比（eval_tracks 同一杆秤）")
+    # 生产行三个计数（段数/点数/长段）直接由当前 pkl 现算，避免与磁盘产物脱节
+    _prod = load_traj3d("v3nf_hung")
+    _n30 = sum(1 for x in _prod if len(x) >= 30)
+    _npts = sum(len(x) for x in _prod)
+    _n100 = sum(1 for x in _prod if len(x) >= 100)
     st.table({
         "指标": ["3D 段数(≥30帧)", "总 3D 点数", "≥100帧片段", "主峰率", "有效测速对",
                "c (mm/s)", "95% CI", "PINN 留出 R²"],
         "v1 旧生产(严格检测)": ["190", "10747", "21", "71%", "88", "2033 (+2.9%)", "[2000,2070]", "0.456"],
         "v3 含泡沫(对照组)": ["1474", "335819", "421", "93%", "97471", "2007 (+1.6%)", "[2006,2008]", "0.854"],
-        "v3nf 泡沫过滤+带内分类(生产)": ["975", "292039", "369", "94%", "70135", "1992 (-0.05%)", "[1982,2002]", "0.964"],
+        "v3nf 泡沫过滤+带内分类(生产)": [f"{_n30}", f"{_npts}", f"{_n100}", "94%", "70135",
+                                   "1992 (-0.05%)", "[1982,2002]", "0.964"],
         "DINO门控(对照,多对一)": ["2578", "472396", "841", "88%", "287092", "1997 (+1.1%)", "[1996,1997]", "—"],
     })
     st.caption("判据核验：连通域≥1500px² 拒天然水沫团（精度100%）；亮度判据已被数据推翻，未使用。"
-               "生产行已按 8/4 口径修正（c=1992，片段级诚实 CI [1982,2002]）；除生产行外其余比较行"
-               "为口径修正前的旧值，仅作相对趋势参考。下方按钮用已修复的 eval_tracks 实跑为准。")
+               "生产行三个计数（段数/点数/长段）由当前 pkl 现算；主峰率/有效测速对/c/CI/R² 为 eval_tracks "
+               "输出口径，与原始 pkl 直计略有出入属正常。除生产行外其余比较行仍为口径修正前的旧值，"
+               "仅作相对趋势参考。下方按钮用已修复的 eval_tracks 实跑为准。")
 
     ds = st.radio("选择裁判对象", ["生产基线 v3nf_hung(泡沫过滤)", "对照组 v3app_hung(含泡沫)"],
                   horizontal=True, key="judge_ds")
