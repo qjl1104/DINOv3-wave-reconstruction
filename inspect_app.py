@@ -339,7 +339,7 @@ def tab_detection():
             vpath = os.path.join(ROOT, f"data/visualization/det_preview_{side}_{version}.mp4")
             with st.spinner(f"渲染 {n_seg} 帧..."):
                 vw = None
-                for f0 in range(int(n_seg)):
+                for f0 in range(min(int(n_seg), len(dets))):
                     frm = rect_frame(side, f0, gray=False)
                     pm = metas[f0] if metas is not None else None
                     for k, (x, y) in enumerate(dets[f0]):
@@ -442,6 +442,9 @@ def tab_matching():
         for fr in set(t[:, 0].astype(int)):
             cnt[fr] += 1
     frames_sorted = [int(f) for f, _ in cnt.most_common()]
+    if not frames_sorted:
+        st.warning(f"数据集 {variant} 的 3D 轨迹为空，无匹配点可展示")
+        return
     frame, playing, fps = frame_player("m", "帧（按匹配点数排序，靠前=点多）", frames_sorted[:200])
     n_pts_frame = cnt[frame]
     st.write(f"frame {frame}: **{n_pts_frame}** 个匹配点")
@@ -567,7 +570,8 @@ def tab_pointcloud():
 def tab_judge():
     st.header("⑥ 互谱相位裁判")
     st.markdown("互谱相位法从轨迹对自身测相速度 c 与传播方向，不依赖 PINN、不依赖浪高仪，"
-                "是全链路的内生裁判。理论 c ≈ 1976 mm/s。")
+                "是全链路的内生裁判。理论相速：**1976 mm/s @ 名义 0.79Hz**；本窗口实测主频 0.783Hz"
+                "的线性深水色散为 **1993 mm/s**（当前生产基线 1992 与之吻合，残余 -0.05%）。")
 
     st.subheader("泡沫影响 A/B 对比（eval_tracks 同一杆秤）")
     st.table({
@@ -575,10 +579,12 @@ def tab_judge():
                "c (mm/s)", "95% CI", "PINN 留出 R²"],
         "v1 旧生产(严格检测)": ["190", "10747", "21", "71%", "88", "2033 (+2.9%)", "[2000,2070]", "0.456"],
         "v3 含泡沫(对照组)": ["1474", "335819", "421", "93%", "97471", "2007 (+1.6%)", "[2006,2008]", "0.854"],
-        "v3nf 泡沫过滤+带内分类(生产)": ["975", "292039", "369", "94%", "70135", "2008 (+1.6%)", "[2007,2008]", "0.964"],
+        "v3nf 泡沫过滤+带内分类(生产)": ["975", "292039", "369", "94%", "70135", "1992 (-0.05%)", "[1982,2002]", "0.964"],
         "DINO门控(对照,多对一)": ["2578", "472396", "841", "88%", "287092", "1997 (+1.1%)", "[1996,1997]", "—"],
     })
-    st.caption("判据核验：连通域≥1500px² 拒天然水沫团（精度100%）；亮度判据已被数据推翻，未使用。")
+    st.caption("判据核验：连通域≥1500px² 拒天然水沫团（精度100%）；亮度判据已被数据推翻，未使用。"
+               "生产行已按 8/4 口径修正（c=1992，片段级诚实 CI [1982,2002]）；除生产行外其余比较行"
+               "为口径修正前的旧值，仅作相对趋势参考。下方按钮用已修复的 eval_tracks 实跑为准。")
 
     ds = st.radio("选择裁判对象", ["生产基线 v3nf_hung(泡沫过滤)", "对照组 v3app_hung(含泡沫)"],
                   horizontal=True, key="judge_ds")
@@ -608,10 +614,12 @@ def tab_pinn():
     st.header("⑦ PINN 场重建")
     for img_name, cap in [("final_result.png", "数据 vs 重建（快照 + 稠密 Hovmöller + RMS 振幅 + 代表点时程）"),
                           ("verify_results.png", "一眼核验（η(t) + FFT 主峰 + 重合度）"),
-                          ("field_comparison.png", "场对比")]:
+                          ("field_comparison.png", "场对比（当前生产 pinn_real.pt）"),
+                          ("field_comparison_c1992.png", "场对比（--c 1992 重训验证版，仅存档）")]:
         p = os.path.join(REAL_RUN, img_name)
         if os.path.exists(p):
-            st.image(p, caption=cap, width='stretch')
+            mt = time.strftime("%m-%d %H:%M", time.localtime(os.path.getmtime(p)))
+            st.image(p, caption=f"{cap}  [生成 {mt}]", width='stretch')
 
     if os.path.exists(FIELD_NPZ):
         st.subheader("波面场交互浏览")
